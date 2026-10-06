@@ -1,0 +1,150 @@
+{
+  "id": "stats",
+  "version": "0.1.0",
+  "platformApi": "0.19.0",
+  "name": "Stats",
+  "license": "AGPL-3.0-or-later",
+  "author": "The Mosaicast Authors",
+  "homepage": "https://github.com/Mosaicast/mosaicast-plugin-stats",
+  "attribution": "https://github.com/GameOfPods/MAT",
+  "backend": {
+    "basePath": "/api/plugins/stats",
+    "extensions": [
+      "dev.mosaicast.plugin.stats.StatsPlugin"
+    ]
+  },
+  "frontend": {
+    "entry": "stats.es.js",
+    "elements": [
+      "stats-episode",
+      "stats-card",
+      "stats-overview",
+      "stats-page"
+    ]
+  },
+  "slots": [
+    {
+      "scope": "episode",
+      "element": "stats-card",
+      "placement": "card",
+      "visibleTo": "anonymous",
+      "order": 200
+    },
+    {
+      "scope": "episode",
+      "element": "stats-episode",
+      "placement": "main",
+      "visibleTo": "anonymous",
+      "order": 200
+    },
+    {
+      "scope": "feed",
+      "element": "stats-overview",
+      "placement": "feed",
+      "visibleTo": "anonymous",
+      "order": 200
+    },
+    {
+      "scope": "site",
+      "element": "stats-overview",
+      "placement": "site",
+      "visibleTo": "anonymous",
+      "order": 200
+    },
+    {
+      "scope": "site",
+      "element": "stats-page",
+      "placement": "page",
+      "visibleTo": "anonymous"
+    }
+  ],
+  "nav": [
+    {
+      "path": "",
+      "label": "Stats",
+      "icon": "chart-bar"
+    },
+    {
+      "path": "manage",
+      "label": "Manage stats",
+      "icon": "upload",
+      "visibleTo": "podcaster"
+    }
+  ],
+  "storage": "doc",
+  "data": {
+    "readableBy": "anonymous",
+    "writableBy": "podcaster",
+    "backendOwned": [
+      "stats",
+      "stats:*",
+      "index",
+      "readers",
+      "import:*",
+      "staged:*"
+    ],
+    "keyFloors": [
+      {
+        "keys": [
+          "import:*",
+          "staged:*",
+          "cmd:*"
+        ],
+        "readableBy": "podcaster"
+      },
+      {
+        "keys": [
+          "bundles"
+        ],
+        "writableBy": "admin"
+      }
+    ]
+  },
+  "blobs": {
+    "maxFileBytes": 20971520,
+    "quotaBytes": 536870912,
+    "mimeTypes": [
+      "application/zip"
+    ],
+    "readableBy": "podcaster",
+    "writableBy": "podcaster"
+  },
+  "consent": {
+    "services": [
+      {
+        "id": "stats-view",
+        "name": "Stats view settings",
+        "provider": "The operator of this website",
+        "category": "necessary",
+        "hosts": [],
+        "thirdCountryTransfer": false,
+        "storage": [
+          {
+            "name": "mc.stats.view",
+            "type": "sessionStorage",
+            "purpose": "Remembers which stats you picked (for example whether spoilers are shown) while this tab is open. Only written when you change the choice; holds no identifier.",
+            "duration": "session"
+          }
+        ]
+      }
+    ]
+  },
+  "config": {
+    "queueIntervalSeconds": {
+      "type": "number",
+      "default": 10,
+      "editableBy": "admin",
+      "min": 10,
+      "max": 600,
+      "step": 1,
+      "label": {
+        "en": "Upload check interval (seconds)",
+        "de": "Prüfintervall für Uploads (Sekunden)"
+      },
+      "description": {
+        "en": "How often the server looks for new uploads and assignments. Lower means less waiting on the manage page.",
+        "de": "Wie oft der Server nach neuen Uploads und Zuordnungen schaut. Niedriger heißt weniger Warten auf der Verwalten-Seite."
+      }
+    }
+  }
+}
