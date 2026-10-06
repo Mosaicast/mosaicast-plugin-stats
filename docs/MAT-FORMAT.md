@@ -1,120 +1,116 @@
-# MAT Output Format (input for the stats plugin)
+# MAT results (input for the stats plugin)
 
-Source: [GameOfPods/MAT](https://github.com/GameOfPods/MAT) (GPL-3.0). **Confirmed against a real sample export (MAT 0.2.0, `meta.version = "1"`)** — all schemas below are verified.
+Source: [GameOfPods/MAT](https://github.com/GameOfPods/MAT). The authoritative spec is `result-format.md` in
+`mat-result-format-<version>.zip`, attached to every MAT release together with JSON Schemas. This file only
+says which parts the plugin reads and how it turns them into its own model. Written against **format 2.6.0**
+(MAT 0.3.1).
 
-> **Positioning:** MAT is the **first stats source**, attached via `MatStatsReader` (`canRead`/`read`, see the stats brief). The reader parses the MAT format (`MatExport` below) and **normalizes** it to the source-agnostic `EpisodeStats` model that the plugin stores/displays. Other tools attach later via their own readers — this file describes only the MAT input.
+> Format 1 (MAT 0.2.0 and older, `0.PodcastOutput/` folders with `media.json`, `diarization.json`, …) is gone.
+> MAT itself calls it unreadable. The reader recognises it and tells the uploader to re-run with MAT 0.3+.
 
-## Upload candidate: a ZIP of the output folder
-MAT writes one folder per analyzed file; the user zips it, **the ZIP is the upload**:
+## The upload
+
+One ZIP per analysed file, as MAT writes it with `--output-zip` (files at the root). A ZIP of the result
+*folder* works too: a single top-level directory is stripped.
+
 ```
-SPOILER! 5.22 - Arya IV_2026-06-28_20-56-03/
-├── meta.json
-├── config.json                 ← pipeline configuration (irrelevant to the stats plugin)
-└── 0.PodcastOutput/            ← one subfolder per pipeline result
-    ├── media.json
-    ├── transcript.json
-    ├── transcript.txt
-    ├── diarization.json
-    ├── diarization.rttm
-    └── summary.txt
+meta.json             always
+config.toml           only with --export-config, ignored
+podcast/result.json   all data; the only file read besides meta.json
+podcast/…             convenience copies (transcript.txt, summary.md, diarization.rttm), ignored
+book/result.json      EPUB analysis → book stats (see below)
 ```
-Flow in the plugin: unzip → read `meta.json` → find the podcast pipeline folder → parse the files defensively.
+
+Archive limits (`Archive.Limits.DEFAULT`): 64 MB archive, 512 entries, 96 MB per entry and 192 MB in total,
+counted on the bytes actually inflated. Entry names with `..`, a leading `/`, a drive letter, a backslash or a
+duplicate are refused. Nothing is written to disk.
 
 ## meta.json
-```json
-{
-  "version": "1",
-  "MAT_version": "0.2.0",
-  "file_name": "SPOILER! 5.22 - Arya IV.mp3",
-  "file_hash": "3d416d80…",
-  "file_name_wo_extension": "SPOILER! 5.22 - Arya IV",
-  "full_file": "/media/ned/NAS/…/SPOILER! 5.22 - Arya IV.mp3",
-  "creation_time": "2026-06-28T20:56:03.483158",
-  "pipelines": [
-    { "folder": "0.PodcastOutput", "type": "<class 'MAT.pipelines.Podcast.PodcastOutput'>" }
-  ]
-}
+
+| Field | Used for |
+|---|---|
+| `format` | must be `2`, anything else is refused |
+| `format_version` | stored as `source.format` |
+| `mat_version` | stored as `source.tool` ("MAT 0.3.1") |
+| `created` | `source.createdAt` |
+| `input.name` | `source.inputName`, and matched against episode titles to suggest an episode |
+| `input.sha1` | `source.inputHash`; a new upload with the same hash replaces the old import |
+| `input.path` | **ignored on purpose** (an absolute path on the producing machine) |
+| `pipelines` | must contain `podcast` |
+| `failed_steps` | one `step-failed` warning each |
+
+## podcast/result.json → `EpisodeStats`
+
+Every list may be empty and every number may be `null`; unknown fields are ignored.
+
+| Stats field | Computed from |
+|---|---|
+| `durationSeconds` | `media.duration`, else the end of the last line |
+| `speakers[].speakingSeconds` | union of the speaker's `speakers[].segments` |
+| `speakers[].share` | speaking seconds / sum over all speakers |
+| `speakers[].key` | `library_id` if present (same voice across episodes), else `id` |
+| `speakers[].words` | words in `words` naming the speaker (a word with two speakers counts for both) |
+| `speakers[].wpm` | words / speaking minutes |
+| `speakers[].turns`, `longestTurn` | lines in `segments` naming the speaker; the longest single-speaker one |
+| `speakers[].questions` | sentences (`sentences`, since 2.6) by that speaker ending in `?` |
+| `speechSeconds` | union of all speakers' segments |
+| `overlapSeconds` | sum of speaking seconds minus `speechSeconds` |
+| `longestSilence` | the largest gap between two stretches of speech (start and end of the file don't count) |
+| `turns` | changes of speaker between consecutive lines |
+| `words`, `unattributedWords` | `words`, and the ones with no speaker |
+| `sentences`, `questions` | `sentences` and those ending in `?` |
+| `events` | `events` grouped by `label` (count, total length, start times) |
+| `entities` | `entities` grouped by `label`, counted case-insensitively, top 15 each; mentions of the speakers themselves are left out |
+| `timeline` | each speaker's segments with gaps under 1 s closed, rounded to 0.1 s |
+| `extra.models` | `models`, as "backend model" per step |
+
+Not read: `summary`, `diarization` (except for the repair below), `media.speech_duration`, `media.rms`, …
+
+## book/result.json → `BookStats`
+
+Read only for counts and names; no paragraph, sentence, lemma or summary is stored.
+
+| Stats field | Computed from |
+|---|---|
+| `title` | `title` (the import's hint; `input.name` when missing) |
+| `chapters[].id` | `c0`, `c1`, … in table-of-contents order |
+| `chapters[].heading` | `heading` (MAT already makes repeated headings unique) |
+| `chapters[].words` | whitespace-separated tokens in `paragraphs` that contain a letter or digit |
+| `chapters[].sentences` | number of `sentences` (null when splitting didn't run) |
+| `chapters[].paragraphs` | non-empty `paragraphs` |
+| `chapters[].longestSentence` | words in the longest of `sentences[].text` (counted like `words`) |
+| `chapters[].dialogue` | `sentences` whose text contains a quotation mark (`„ “ ” " » « ‹ ›`; apostrophes don't count) |
+| `chapters[].questions` | `sentences` ending in `?`, maybe followed by closing quotes or brackets |
+| `chapters[].entities` | `sentences[].entities` grouped by `label`, case-insensitive, top 15 each; `PERSON` (the character list covers people), `DATE`, `TIME` and number labels are left out |
+| `chapters[].characters` | `characters[].chapters[heading]`, top 15 per chapter |
+| `chapters[].newCharacters` | characters whose first chapter (by order) with a mention is this one, ordered by their mentions in the whole book, top 15 |
+
+Sentence texts are only counted and never stored. Not read: `chapters[].summary` (AI-written),
+`sentences[].lemmas`, `characters[].variants`, `characters[].joined`.
+
+`BookStats.MODEL` is 2 since the sentence numbers and places/groups were added. Books staged with an older
+model are queued for a re-read from their archive when the plugin starts.
+
+## When `speakers` and the transcript disagree
+
+The spec says to use `speakers` for speaking time. In real results that list can lose most of a speaker: one
+2.6.0 result had a speaker at 0.1 s in `speakers` while ~5,000 words and ~1,600 s of lines named them
+(reported as [GameOfPods/MAT#4](https://github.com/GameOfPods/MAT/issues/4)). So the reader checks:
+
+- If a speaker's segment time is below half the time of the lines naming them (and those lines add up to at
+  least a minute), it assigns each `diarization` cluster to the speaker most of its words belong to and
+  rebuilds the speaker's time from those clusters. Warning `speaker-rebuilt`.
+- A speaker the lines name for a minute or more but who is missing from `speakers` is added the same way.
+  Warning `speaker-added`.
+- If rebuilding doesn't help, the numbers stay as MAT wrote them. Warning `speaker-mismatch`.
+
+Warnings are shown to podcasters on the manage page, not to visitors.
+
+## Testing against your own results
+
+```bash
+cd backend && ./gradlew test -PstatsSamples=/path/to/results
 ```
-- **Find the pipeline:** take the entry in `pipelines` whose `type` ends with `PodcastOutput` → use its `folder`. (There may also be a `BookOutput` — irrelevant to stats.)
-- Check `version` (currently `"1"`); reject/handle unknown versions defensively. Ignore `full_file` (an absolute path from the producing machine).
 
-## media.json  → runtime & language
-```json
-{
-  "file_name": "SPOILER! 5.22 - Arya IV.mp3",
-  "duration": 1174.776,            // seconds (float)  ← RUNTIME
-  "duration_after_vad": 1144.872,  // seconds without silence
-  "sample_rate": 48000,
-  "max_dbfs": -3.26,
-  "rms": 2443,
-  "language": "de"
-}
-```
-
-## diarization.json  → speaker timeline (main source for speaking shares)
-Mapping **speaker → list of `[from, to]` segments in seconds**:
-```json
-{
-  "alex": [[20.16, 21.6], [23.44, 24.88], …],
-  "max":  [[…, …], …]
-}
-```
-- Speaker keys may **already be real names** (here `alex`, `max`) or technical labels (`SPEAKER_00`), depending on whether MAT had gold-label identification. See "Speaker mapping".
-
-## transcript.json  → word level with speaker
-```json
-{ "transcript": [
-  { "speaker": ["alex"], "word": "Herzlich", "start": 20.27, "finish": 20.551 },
-  …
-] }
-```
-- **`speaker` is a list of 0..N labels:** `["alex"]` (normal), `[]` (unattributed — 73× in the sample), `["alex","max"]` (overlap — 21×). When counting: skip empty or track as `<none>`; count multi for each speaker involved.
-- `start`/`finish` in seconds (float).
-
-## diarization.rttm  → fallback timeline
-Standard RTTM, one line per segment, the speaker name in the `speaker_name` column:
-```
-SPEAKER SPOILER! 5.22 - Arya IV.mp3 1 20.16 1.44 <NA> <NA> alex <NA> <NA>
-```
-- **Caution:** the `file_id` column here contains **spaces** (the file name) → naive whitespace splitting breaks. **Prefer `diarization.json`**, RTTM only as a fallback.
-
-## transcript.txt / summary.txt / config.json
-Plain transcript · markdown summary · pipeline config (models, labels) — not needed for the stats plugin.
-
----
-
-## Typed interface (parsed model, Java)
-```java
-record MatExport(MatMeta meta, PodcastData podcast) {}
-record MatMeta(String version, String matVersion, String fileName, String fileHash,
-               Instant creationTime) {}
-record PodcastData(MediaInfo media, List<Word> transcript,
-                   Map<String, List<Segment>> diarization, String summaryMarkdown) {}
-record MediaInfo(String fileName, double duration, double durationAfterVad,
-                 int sampleRate, String language) {}
-record Word(List<String> speakers, String word, double start, double finish) {}
-record Segment(double from, double to) {}   // seconds
-```
-TS types mirror this 1:1 (`speakers: string[]`, numbers as `number`).
-> The reader maps this `MatExport` to the source-agnostic `EpisodeStats` (see the stats brief), which is what the plugin actually stores.
-
-## Computations (with a worked example from the sample)
-Prefer `diarization.json`; `duration` from `media.json`.
-
-- **Speaking share** (share of talk time) = `speakerTime / Σ speakerTime`.
-  → alex **74.7%**, max **25.3%**. (`speakerTime` = sum of a speaker's segment durations.)
-- **Talk fraction of the episode** = `speakerTime / duration` → alex 55.1%, max 18.7%.
-- **Overlap note:** `Σ speakerTime` double-counts overlapping passages. For "how much of the episode had speech at all" build the **union** of the segments → 72.8% (855 s of 1174.8 s).
-- **Longest silence** = the largest gap in the **merged** (union) timeline, incl. start/end `[0, duration]`.
-  → **20.2 s** (at the start, 0–20.2 s).
-- **Words per speaker** from `transcript.json` (multi counts for each, empty as `<none>`).
-  → alex 1800, max 730, none 73. **WPM** = `words / (speakerTime/60)`.
-
-## Speaker mapping
-Labels may already be names (`alex`/`max`) **or** technical (`SPEAKER_00`). The plugin maintains an **optional override mapping `label → display name` per feed/episode** in the doc store: if a label is set, show that; otherwise the raw label. So both cases work without a special case.
-
-## Robustness
-- **Every file is optional** — tolerate missing ones (MAT writes only present data).
-- `speaker` arrays can be empty or multiple.
-- Check `meta.version`; reject unknown versions instead of guessing.
-- Numbers are seconds (float); format as mm:ss/hh:mm:ss for display.
+runs every ZIP in that folder through the readers and prints what came out. The repo itself only contains
+MAT's own example result (Apache-2.0, `backend/src/test/resources/mat-example/`).

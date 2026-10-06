@@ -1,6 +1,6 @@
 # Project: Mosaicast – mosaicast-plugin-stats
 
-Episode/feed plugin: normalized stats (speaking shares, runtime, silence). MAT as the first reader.
+Episode/feed/season stats (speaking time, length, pauses, laughs, mentions) from uploaded analysis results. MAT is the first reader.
 
 ## Read first (mandatory)
 - `docs/ARCHITECTURE.md` — source of truth for the whole system. On conflict, this file wins.
@@ -13,9 +13,53 @@ Java 21 (Gradle, PF4J extension) · React + Vite (Web Component)
 
 ## Commands
 ```
-./build.sh        # -> dist/
-cd backend && ./gradlew test  ;  cd ../frontend && npm test
+./build.sh                                   # -> dist/ (stats.jar, assets/stats.es.js, plugin.json)
+cd backend && ./gradlew test                 # add -PstatsSamples=/dir to run real result ZIPs through the readers
+cd frontend && npm test && npm run typecheck # Vite doesn't type-check; tsc does
 ```
+
+## Layout
+- `plugin.json` — id `stats`, platformApi **0.19.0** (exact major.minor at load; keep it equal to the
+  `plugin-api`/`plugin-testkit`/`@mosaicast/plugin-sdk` pins, CI and `manifest.test.ts` compare them).
+- `backend/…/stats/` — `StatsPlugin` (schedule, routes, OG), `read/` (`StatsReader` SPI, `Archive` with zip
+  limits, `ReaderRegistry`, `StatsUnit` = podcast or book), `mat/` (MAT format 2: `MatAnalysis` podcast,
+  `MatBook` book), `model/` (`EpisodeStats`, `BookStats`), `ingest/` (`Ingestor` reads uploads, works the
+  `cmd:*` queue, publishes per assignment; `Bundles`; `EpisodeMatcher` incl. chapters; doc shapes in `Docs`).
+- `frontend/src/` — one bundle, four elements (`stats-episode`, `stats-card`, `stats-overview`,
+  `stats-page`; routes `''`, `season/:n`, `books`, `books/season/:n`, `books/:book`, `manage`, mirrored by
+  `StatsPlugin.hasRoute`); `aggregate.ts`/`book.ts` sum any episode set (`chapterPoints` for the books
+  view), `useChapterDetails` loads per-chapter names with one `getMany`, `combine.ts` adds ticked podcast bundles,
+  `viewChoice.ts` keeps the visitor's bundle/spoiler choice, `seasons.ts` looks seasons up from snapshots.
+- `docs/MAT-FORMAT.md` — how MAT results map to `EpisodeStats` (repo-owned, keep current).
+
+## Plugin-specific rules
+- The browser never writes stats. It writes `cmd:*` (queue), `bundles` and `speakers` (settings), and
+  `user/me/view` (a visitor's choice); everything else is `backendOwned` (`stats:*`, `index`, `import:*`,
+  `staged:*`, `readers`). Never reserve a key the UI writes (`manifest.test.ts` checks).
+- Published stats: `stats:<bundle>` on the target. Bundles come from the `bundles` doc (podcaster-written,
+  validated in `Bundles`); a kind without settings has an implicit bundle whose id is the kind.
+- Book slugs (`books/<slug>`) come from `BookStats.slug(title)`, stored as `BookSummary.book`; `bookSlug` in
+  `book.ts` must match it. Bump `BookStats.MODEL` when the reader adds book fields: older staged books are
+  then re-read at start-up (`Ingestor.queueUpgrades`). Keep per-chapter names out of the `index` (it's read
+  on every page); the books view reads them from `stats:<bundle>`.
+- Anonymous view choice: `sessionStorage` `mc.stats.view` only, declared `necessary` in the manifest; never
+  persistent storage without a consent category. Book stats: counts and names only, never text or summaries.
+- An upload needs no command: `Ingestor` reads every blob no import's `archive` points at. `ingest` cmds
+  exist only to force a reader. Keep failed reads as imports with their archive, or they'd be retried forever.
+- Uploaded ZIPs are kept for re-reads and are private (`blobs.readableBy: podcaster`, core 0.7.6). Stats
+  are public. Discard/replace deletes the archive.
+- New source = new `StatsReader` in `ReaderRegistry.builtIn()`; the UI and storage don't change.
+- Stats go public only when the target episode is RELEASED (`Ingestor.liveness`, `ImportRecord.live`): held
+  for PLANNED/UPCOMING/WITHDRAWN, published on `onEpisodeReleased` and by `reconcile` on the schedule. The
+  index lists live stats only. `onEpisodePhaseChanged` → `Ingestor.phaseChanged` takes stats down at once when
+  an episode goes quiet, is withdrawn or cancelled. Quiet plans may be suggested: `import:*`, `staged:*` and
+  `cmd:*` sit behind a podcaster read key floor. Anything that can name a quiet plan must stay behind it.
+- `bundles` is admin-writable (key floor); the manage page shows podcasters a read-only editor. `speakers`
+  stays podcaster-writable.
+- Personal data: only the USER-scope `view` doc, which core exports/erases. `StatsPlugin` is a
+  `UserDataHandler` that says so; keep it true if the plugin ever stores an account id.
+- Needs core 0.8.0+. Seasons: `DisplaySnapshot.season` via `ctx.feeds.displayMany` (`useSeasons`), labels
+  only as fallback. The feed tile follows `ctx.filter.season` when set.
 
 ## Conventions (binding)
 - Java packages `dev.mosaicast.*`; npm scope `@mosaicast`.

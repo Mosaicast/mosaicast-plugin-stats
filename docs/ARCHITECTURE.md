@@ -70,30 +70,51 @@ EpisodeRef
   external_guid String?      -- the source's GUID (null when PLANNED)
   season        Int?         -- from itunes:season, persisted as a relation
   episode_no    Int?
+  numbers_pinned Bool        -- season + episode_no set by a podcaster; polls no longer overwrite them (4.4)
+  feed_season, feed_episode_no Int?  -- what the feed last declared, so un-pinning restores it at once (4.4)
   status        Enum         -- PLANNED | PUBLISHED | WITHDRAWN
   access        Access       -- PUBLIC | TIER(ref)
   first_seen_at, last_seen_at
   provisional_display Json?   -- only set when PLANNED (see 4.3)
+  announce_at   Instant?     -- PLANNED only: when a quiet plan goes public; null = quiet until announced (4.3)
+  client_ref    String?      -- a planner's own reference, unique per feed; makes a retried create idempotent
 ```
 
-**Status lifecycle:** `PLANNED` → `PUBLISHED` → possibly `WITHDRAWN`.
+**Status lifecycle:** `PLANNED` → `PUBLISHED` → possibly `WITHDRAWN`. What plugins and the shell reason about is the **phase** derived from it (§4.3), not the stored status.
 
 ### 4.2 Display snapshot (NOT authoritative, from the feed)
-Title, description, audio URL, pubDate, runtime/duration (`<itunes:duration>`/enclosure), **episode artwork** (`itunes:image`) with the **feed/show cover** (channel `itunes:image`) as a fallback (`artwork()` = episode → feed), **author** (`itunes:author`, falling back to the channel author) and **subtitle** (`itunes:subtitle`). **Overwritten** on every fetch from the raw feed, only read-through cached. So a description change in the RSS propagates automatically and never lives in the DB as truth. (Episode **tags** — `itunes:keywords`/`<category>` — are feed-derived too but stored as a relation `episode_tag`, since they are a filter/scoping axis, §6.1.)
+Title, description, audio URL, pubDate, runtime/duration (`<itunes:duration>`/enclosure), **episode artwork** (`itunes:image`) with the **feed/show cover** (channel `itunes:image`) as a fallback (`artwork()` = episode → feed), **author** (`itunes:author`, falling back to the channel author) and **subtitle** (`itunes:subtitle`). **Overwritten** on every fetch from the raw feed, only read-through cached. So a description change in the RSS propagates automatically and never lives in the DB as truth. **The description is third-party HTML** — whatever the podcast host published, so whoever controls the feed controls it. The shell renders it only through its sanitizer, and plugins receive it **verbatim and unsanitized**, documented as such, with `descriptionText` beside it: the same prose reduced to plain text by the host (Jsoup), for cards, teasers, OG descriptions and search excerpts. It is derived rather than stored for rows written before it existed, so no backfill is needed (platformApi 0.16.0). Plugins also receive the episode's **place in the site** — `feed` (the feed's public slug), `season`, `episodeNo` — which belongs to the identity layer (`EpisodeRef`, §4.4), not to the feed's presentation: the host adds it **on read** and **never stores it in the snapshot**, so a refetch rewriting the snapshot cannot move an episode between seasons in a plugin's eyes. Each is absent when the episode does not have it, and a season scope (`Scope.season(feed, n)`) only exists for an episode that has both (platformApi 0.17.0). (Episode **tags** — `itunes:keywords`/`<category>` — are feed-derived too but stored as a relation `episode_tag`, since they are a filter/scoping axis, §6.1.)
 Table: `episode_display(episode_ref_id, snapshot JSONB, fetched_at)`. Swappable for Redis later.
 
 > **Core display vs. plugin metrics:** Runtime/date in the main UI (feed cards, detail header, player) always come from the **feed snapshot**. Metrics provided by plugins (e.g. MAT runtime, speaking shares) are **non-authoritative, possibly absent** (not every episode has stats) and are shown **only inside that plugin's UI** — never in the core display.
 
 ### 4.3 Planned episodes (PLANNED) – creating episodes before the RSS
 Hosts make bingos for the **upcoming** episode. So episodes must be creatable before they appear in the feed.
-- A podcaster creates a planned episode → `EpisodeRef` with `status=PLANNED`, `source=manual`, `provisional_display` (title + planned season/episode no.). **Only here** does display data live authoritatively in the DB — until the feed takes over.
+- A podcaster or admin creates a planned episode → `EpisodeRef` with `status=PLANNED`, `source=manual`, `provisional_display` (title, description, planned season/episode no.). **Only here** does display data live authoritatively in the DB — until the feed takes over. It is created in the admin area or over the API with a personal access token (§8.5); the answer carries the **slug**, so a follow-up call can prepare plugin content on it straight away. An optional `client_ref` makes a retried create return the existing plan instead of a second one.
 - Plugin data (bingos) attaches to the internal ID immediately.
-- When the real episode appears in the RSS → **binding instead of duplicating** (see 5.3). Status flips `PLANNED → PUBLISHED`, from then on the feed snapshot rules. Plugin data is untouched because it hung on the ID, not the feed.
+- When the real episode appears in the RSS → **binding instead of duplicating** (see 5.3). Status flips `PLANNED → PUBLISHED`, from then on the feed snapshot rules. Plugin data is untouched because it hung on the ID, not the feed. The **slug is kept**, so links shared before the release keep working; the feed's title and description replace the planned ones everywhere.
 
-`PLANNED` = bingo prediction phase, `PUBLISHED` = resolution.
+**Quiet first, announced later.** A plan is **quiet by default**: only podcasters and admins see it, so content can be prepared without telling the audience. `announce_at` makes it public from that moment; it can also be announced by hand, or set back to quiet while it is still planned. **The feed outranks the schedule**: a feed item that binds before `announce_at` releases the episode anyway. A quiet episode stays out of **every** public surface — lists, detail, search, tags, related, previous/next, link previews, sitemap, and the scope checks plugin requests go through — and a podcaster opening it sees a notice that nobody else can. A plugin's **backend** (`FeedAccess`) sees quiet episodes, because preparing them is the point; a plugin's **frontend** sees one only when the viewer may.
+
+**Phase, derived at read time, no scheduler** (`EpisodePhase`, platformApi 0.18.0):
+
+| phase | stored state | who sees it |
+|---|---|---|
+| `PLANNED` | `PLANNED`, `announce_at` null or in the future | podcasters, admins, plugin backends |
+| `UPCOMING` | `PLANNED`, `announce_at` reached | everyone — "upcoming" stub, no audio |
+| `RELEASED` | `PUBLISHED` | everyone |
+| `WITHDRAWN` | `WITHDRAWN` | as §5.2 |
+
+Nothing flips at `announce_at`: every read compares it with the clock, so there is no job to miss and no window in which the episode is half-announced. Plugins read the phase and are **told** of a release, and of any *write* that changes the phase (§7.4); they never infer it from a title or a date.
+
+**Editing and cancelling.** While an episode is planned, its title, description, numbers and `announce_at` can be changed. Once released, its details are the feed's and the planning API refuses. Cancelling a plan deletes it **together with the plugin data prepared for it**, since nothing else could ever reach that data again.
+
+`PLANNED` = preparation (quiet), `UPCOMING` = bingo prediction phase, `RELEASED` = resolution.
 
 ### 4.4 Season as a first-class concept
 Season is **not** a plugin concern. The fetcher extracts `itunes:season` and persists it as a relation on the `EpisodeRef`. A season = "all EpisodeRefs of a feed with season=N". Season is a **scope** (§6).
+
+**A podcaster can set the numbers by hand.** A feed cannot always say what the podcaster means: Apple's spec allows only a non-zero `itunes:episode`, so the season prologue a podcaster calls episode 0 arrives with a season and no number (Acast drops the 0). A podcaster or admin may therefore set a released episode's `season` and `episode_no` — **both together**, and either may be empty — which sets `numbers_pinned`. From then on the reconciler still records what the feed declares, in `feed_season` / `feed_episode_no`, but leaves the effective numbers alone, so a poll never undoes the choice; un-pinning restores the feed's values immediately, without waiting for a poll. The pinned numbers are the episode's numbers **everywhere** — season scope and filter, listing order, labels, and the `season` / `episodeNo` plugins receive (§4.2) — and change nothing else: the slug was minted once and is kept (§4.1), and previous/next still follow release order (§6.2), so an explicit 0 is a podcaster's statement, not the coercion §6.2 rules out. A **planned** episode has no override: its numbers are edited with the plan (§4.3), and on binding the feed's numbers take over as for any new item — unless the plan is matched to an imported episode whose numbers a podcaster had already pinned, in which case the pin moves across with it, like its tags (§5.3). The host never infers a number on its own — not from a title (`5.00 Prolog`), not from a gap in the sequence.
 
 ---
 
@@ -121,12 +142,14 @@ record RawEpisode(String externalGuid, String title, String description, String 
 ### 5.2 Reconciler – raw items become EpisodeRefs
 Match by `(source_id, external_guid)`:
 1. **New GUID** → create `EpisodeRef` (identity + relations only).
-2. **Known GUID** → refresh season relation + display snapshot, plugin data untouched.
+2. **Known GUID** → refresh season relation (only the `feed_*` record when the podcaster pinned the numbers, §4.4) + display snapshot, plugin data untouched.
 3. **Ref exists, GUID now missing** → **never hard delete** (plugin data would orphan, feeds glitch). Set `status=WITHDRAWN`.
 
 ### 5.3 PLANNED binding & dedup (same machinery)
 Before creating a new ref for an unknown GUID, the reconciler checks whether a `PLANNED` ref matches: first by declared season/episode no., otherwise fuzzy title → **suggestion, podcaster confirms**. On binding: set `external_guid` + `source`, `PLANNED → PUBLISHED`.
 This is the **same merge machinery** as v2 dedup (multiple refs → one canonical episode, fuzzy-title merge UI), just triggered at a different time. v1: only PLANNED binding active; the model allows later merging without a rewrite.
+
+**Manual match** covers what neither the numbers nor the title caught, after the feed has already imported the item as an episode of its own. A podcaster matches the plan to that episode: the plan **keeps its identity, slug and plugin data** and takes over the feed item. Listeners' progress, pins and tags move across, and the duplicate is removed. A duplicate that already has **plugin data of its own is refused** with a message saying so, and nothing changes: merging two plugins' worth of state is a decision the host cannot make on a plugin's behalf. Every path that releases a planned episode — binding, a confirmed suggestion, a manual match — announces it to plugins after the transaction commits (§7.4).
 
 ### 5.4 Scheduler
 One periodic job per FeedSource config, **ShedLock-wrapped** (runs only once across N instances). Default 15–30 min, configurable per feed. `pushBased` sources skip polling. "Refresh now" button for podcasters. Dead feeds: backoff, last successful state stays visible. Polling uses **HTTP conditional GET** (ETag / If-Modified-Since) — polite to feed hosts; an unchanged feed costs a 304.
@@ -142,7 +165,7 @@ interface FeedAccess { List<String> episodesIn(Scope scope); DisplaySnapshot dis
 ```
 The host fills the frontend `ctx.episodes[]` from this. A plugin never figures out itself how a season is defined.
 
-**Filter state lives in the URL** (query params, e.g. `?season=2&tag=christmas`): filtered views are shareable/bookmarkable, the back button works, and the server can read the params when rendering share metadata (§6.4). Plugins still consume filters read-only via `ctx.filter`. Filter axes: **season** (§4.4), **tag** (§6.1.1) and ordering; **feed** is selected by the shell's **per-feed tabs** (All + one per feed; a single-feed site shows no tabs and lives at that feed's own URL). The feed view is **two-column**: a left **scope panel** (a **feed panel** — cover/title/author/description + the `feed` plugin region — on a feed tab, or a **site panel** — logo/name + the `site` region — on the All tab) beside the episode list (which infinite-scrolls). Host-defined **subfeeds** (a saved tag/search/filter as a named view) are a planned extension.
+**Filter state lives in the URL** (query params, e.g. `?season=2&tag=christmas`): filtered views are shareable/bookmarkable, the back button works, and the server can read the params when rendering share metadata (§6.4). Plugins still consume filters read-only via `ctx.filter`: `current()` reflects the URL's `season` / `tag` / `order` as `{ season, tags, sort }` (only what is set), `onChange` fires when one changes, and a plugin **page** gets `{}` because its query string is its own (`ctx.route.query`). `ctx.episodes` holds every episode in the scope; the shell pages the host's resolution to the end rather than handing over its first page. Filter axes: **season** (§4.4), **tag** (§6.1.1) and ordering; **feed** is selected by the shell's **per-feed tabs** (All + one per feed; a single-feed site shows no tabs and lives at that feed's own URL). The feed view is **two-column**: a left **scope panel** (a **feed panel** — cover/title/author/description + the `feed` plugin region — on a feed tab, or a **site panel** — logo/name + the `site` region — on the All tab) beside the episode list (which infinite-scrolls). Host-defined **subfeeds** (a saved tag/search/filter as a named view) are a planned extension.
 
 #### 6.1.1 Tags: a shared vocabulary, with provenance
 Tags began as one feed's `<itunes:keywords>`/`<category>`, rewritten on every poll. They are now a **site-wide vocabulary several writers share**, because a plugin that wanted tags otherwise invented a private one — and two things labelled `lore` on the same site had no relationship to each other.
@@ -219,7 +242,7 @@ A plugin = **one folder**: backend JAR (PF4J extension) + `frontend/` (built Web
 {
   "id": "bingo",
   "version": "1.0.0",
-  "platformApi": "1.x",
+  "platformApi": "0.17.0",
   "name": "Bingo",
   "license": "AGPL-3.0-or-later",
   "author": "The Mosaicast Authors",
@@ -231,22 +254,31 @@ A plugin = **one folder**: backend JAR (PF4J extension) + `frontend/` (built Web
     { "scope": "episode", "element": "bingo-host-board",   "placement": "admin",   "visibleTo": "podcaster" }
   ],
   "storage": "doc",
-  "data":    { "readableBy": "fan", "writableBy": "podcaster", "backendOwned": ["stats", "agg:*"] },
-  "config":  { "fuzzyThreshold": { "type": "number", "default": 0.85, "editableBy": "podcaster" } },
+  "data":    { "readableBy": "fan", "writableBy": "podcaster", "backendOwned": ["stats", "agg:*"],
+               "keyFloors": [ { "keys": ["import:*"], "readableBy": "podcaster" } ],
+               "readsAllUsers": true },
+  "config":  { "fuzzyThreshold": { "type": "number", "default": 0.85, "editableBy": "podcaster",
+                                   "min": 0, "max": 1 },
+               "rankBy": { "type": "string", "default": "lines", "editableBy": "admin",
+                           "options": [ { "value": "lines",  "label": { "en": "Lines",  "de": "Reihen" } },
+                                        { "value": "fields", "label": { "en": "Fields", "de": "Felder" } } ] } },
   "tags":    { "readsVocabulary": true, "writesEpisodes": false },
   "external": { "kinds": ["translation"], "usedBy": "podcaster" },
   "consent": { "services": [] }
 }
 ```
-- **`platformApi`**: which SDK contract version it was built against. The host **rejects incompatible plugins at startup** (stability anchor).
+- **`platformApi`**: which SDK contract version it was built against. The host **rejects incompatible plugins at startup** (stability anchor). The match is an exact `major.minor` (pre-1.0 the minor carries breaking changes); the patch floats.
+- **`frontend`**: the ES module `entry` and the custom `elements` it registers. `entry` is the one manifest string that becomes a URL path (`/plugins/<id>/assets/<entry>`), so it has a grammar like every sibling path-shaped string: a relative path under the plugin's own `assets/` — `[A-Za-z0-9._-]` segments joined by `/`, no leading `/`, no `.`/`..` segment, no query or fragment. A non-matching entry **rejects the plugin at load** rather than being rewritten: loading a URL the author did not write is worse than naming the mistake (`FRONTEND_ENTRY_PATTERN` in the SDK).
 - **`slots`**: scope + Web Component + `placement` (named region) + `visibleTo` (minimum role) + optional `order`.
-- **`storage`**: `"doc"` = generic JSONB store. For the wiki, a schema declaration instead (§7.6).
-- **`data`**: the access floor of the generic data surface (§7.6) — `readableBy` / `writableBy`, each `anonymous | fan | podcaster | admin`; `writableBy` may not be `anonymous`. **Declared, never derived:** the host does not infer it from slots. An absent block defaults `readableBy` to the *write* floor, not to anonymous — a **behaviour change**: a plugin that relied on an anonymous slot making its data anonymously readable must now declare `readableBy: "anonymous"` to keep it. A slot's `visibleTo` governs **rendering only**. Neither floor applies to the `USER` scope (§7.6). `backendOwned` names the keys only the plugin's **backend** may write — an exact key, a `*`-terminated prefix, or the bare `*`; clients may still read them (subject to `readableBy`) and a client `PUT`/`DELETE` is a **403** the host words apart from the role-floor one, so an author can tell which rule refused them. It is the only **per-key** rule on this surface; see §7.6 for why it is needed and what it does not do.
-- **`blobs`**: opt-in file storage (§11.1) — `maxFileBytes`, `quotaBytes`, `mimeTypes`. Declared, never derived, like `data`: what a plugin may write to disk should be readable off its manifest. Absent = no file storage at all. The operator caps every number and intersects the type list with the install's own, so a plugin is granted the smaller of the two rather than rejected for asking. `image/svg+xml` is refused at load — SVG is never storable (§12.2).
+- **`storage`**: `"doc"` = generic JSONB store. For the wiki, a schema declaration instead (§7.6), optionally with **`schemaReadableBy`** — the schema read surface's own floor, any of the four roles, defaulting to `data.readableBy` (platformApi 0.19.0). It is a sibling of `schema` rather than inside it because `schema` maps entity names, and a floor there would take one up.
+- **`data`**: the access floor of the generic data surface (§7.6) — `readableBy` / `writableBy`, each `anonymous | fan | podcaster | admin`; `writableBy` may not be `anonymous`. **Declared, never derived:** the host does not infer it from slots. An absent block defaults `readableBy` to the *write* floor, not to anonymous — a **behaviour change**: a plugin that relied on an anonymous slot making its data anonymously readable must now declare `readableBy: "anonymous"` to keep it. A slot's `visibleTo` governs **rendering only**. Neither floor applies to the `USER` scope (§7.6). `backendOwned` names the keys only the plugin's **backend** may write — an exact key, a `*`-terminated prefix, or the bare `*`; clients may still read them (subject to `readableBy`) and a client `PUT`/`DELETE` is a **403** the host words apart from the role-floor one, so an author can tell which rule refused them. `keyFloors` (platformApi 0.19.0) raises the read or write floor of the keys it names — `[{ "keys": [...], "readableBy"?, "writableBy"? }]`, the same selector grammar as `backendOwned`. Together they are the only **per-key** rules on this surface; see §7.6 for why they are needed and what they do not do. `readsAllUsers: true` grants the backend's `ctx.allUsers()` — the read of **every** user's `USER` partition, owner ids included (§7.4). Absent means no. It is declared because it is the one read that crosses an ownership boundary: "can enumerate every account that ever used me" is not what the `USER` scope alone implies, and an operator should be able to read it off the manifest — the admin plugin page shows it. Until platformApi 0.16.0 every plugin had it by existing, as `DocStore.queryAcrossUsers`.
+- **`blobs`**: opt-in file storage (§11.1) — `maxFileBytes`, `quotaBytes`, `mimeTypes`, and optionally its own `readableBy` / `writableBy` (defaulting to the `data` floors). Declared, never derived, like `data`: what a plugin may write to disk should be readable off its manifest. Absent = no file storage at all. The operator caps every number and intersects the type list with the install's own, so a plugin is granted the smaller of the two rather than rejected for asking. `image/svg+xml` is refused at load — SVG is never storable (§12.2).
 - **`tags`**: opt-in access to the shared tag vocabulary (§6.1.1) — `{ "readsVocabulary": true, "writesEpisodes": false }`. Declared, never derived, like `data` and `blobs`; absent means **no tag surface at all** (`ctx.tags` is null, the endpoints 404). Two flags because the two acts are not alike: tagging a plugin's own subjects touches rows nobody else can name, while tagging an **episode** changes the shell's filter options and what core recommends beside that episode — a capability an operator should be able to read off a manifest before installing. A block declaring neither is refused at load, since it would produce a surface that exists and refuses everything.
+- **`identity`**: opt-in resolution of user UUIDs to a name and a picture (§8.8) — `{ "resolvesUsers": true }`. Declared, never derived, like `data`, `blobs` and `tags`; absent means `ctx.users` is null and the endpoint 404s. It is a declaration and not a derivation because a plugin already *holds* user ids — the doc store's `USER` scope and the cross-user read (`ctx.allUsers()`, declared as `data.readsAllUsers`) both hand them over — so the capability being granted is not access to the ids but the turning of them into people, and that is the part an operator should be able to read off a manifest before installing.
+- **`notifications`**: opt-in ability to put a message in a user's inbox (§17) — `{ "sends": true, "perUserPerDay": n }`, the number being what the plugin *asks* for and the operator's cap what it gets. Declared, never derived, like the blocks around it; absent means `ctx.notify` is null and the endpoint 404s. This is the one plugin surface that **writes into another user's view of the site**, so it is the one an operator most needs to see before installing.
 - **`external`**: opt-in use of the instance's external services (§16) — `kinds` names them, `usedBy` is the lowest role that may trigger a call from the plugin's **UI** (default `podcaster`, matching `data.writableBy`'s floor). Declared, never derived, like `data`, `blobs` and `tags`; absent means no external surface at all. `kinds` is a list although translation is the only member today, so a plugin that later wants transcription adds an entry rather than a second block.
-- **`consent`**: third-party services the plugin loads — one declaration each (`id`, `name`, `provider`, `category`, `privacyUrl`, `hosts`, `thirdCountryTransfer`, `storage[]`); the visitor decides per *category*, and `hosts` doubles as the CSP allow-list (§12.5). Omit the key entirely when the plugin loads nothing third-party.
-- **`config`**: declared fields are rendered by core as a **generic admin form** (respecting `editableBy`) — plugins never build their own config UI.
+- **`consent`**: third-party services the plugin loads — one declaration each (`id`, `name`, `provider`, `category`, `privacyUrl`, `hosts`, `thirdCountryTransfer`, `storage[]`); the visitor decides per *category*, and `hosts` doubles as the CSP allow-list (§12.5). A category the plugin introduces (anything but `necessary`, `functional`, `analytics`) owes the visitor a name: **`categoryLabels`**, keyed by category id, gives each a `label` and optional `hint` in the localized-text shape a config label uses (§12.5). Omit the key entirely when the plugin loads nothing third-party.
+- **`config`**: declared fields are rendered by core as a **generic admin form** (respecting `editableBy`) — plugins never build their own config UI. A field may carry **`label`** and **`description`**, which is what an operator actually reads: without them the form could only show the identifier its author chose — `ingestIntervalSeconds (podcaster)` — with no room to say what the setting does, what unit it is in, or what a sane value looks like, and the plugin cannot make up the difference because building its own UI is exactly what it may not do. Both take the same two shapes as an option's label (a plain string, or an object keyed by locale) and resolve in the browser by the same fallback chain; the field key stays visible beside the label, because a plugin's own documentation names the identifier. Prose is not a correctness concern, so the host validates only the shape and never the content, and a field that declares neither reads exactly as it did before. Purely additive, like `options` — **no `platformApi` bump**. A field may declare **`options`**, the closed set of values it accepts: core renders a select instead of a text box and **refuses anything outside the set**, at load for the manifest's own `default` and at write time for an operator's override. Without it a field whose plugin understood two words was a free-text box, where a typo validated, stored, and then fell back silently at read time — reporting a saved setting that did nothing. Each option's `label` is the one manifest string the host **localises**: either a plain string, exactly like the verbatim `nav` and `consent` labels, or an object keyed by locale (`{ "en": "Lines", "de": "Reihen" }`), resolved in the browser against the language the operator is reading in — falling back locale → base language → `en` → any label → the raw value. It is resolved there rather than server-side because the host learns the operator's language from the SPA, and switching it must not need a refetch. Purely additive: an older manifest declares no options and stays free-form, so **no `platformApi` bump**. A field may also declare **bounds** — `min` / `max` / `step` on a `number`, `minLength` / `maxLength` on a `string` (platformApi 0.16.0). Without them any number an operator could type was legal, including the `0` that switched a scheduled task off while the form said "Saved." The host **refuses** an out-of-range write with a 400 that names the bound (never a silent clamp), renders the bounds as input constraints, and refuses at load a manifest whose bounds cannot mean anything — a bound on the wrong type, `min > max`, a non-positive `step`, or a `default` outside its own bounds. A value stored **before** a bound existed that now breaks it counts as **unset**, so the default applies: what a plugin reads through `config()` always satisfies its declaration, and it needs no clamp of its own. There is no `pattern`: Java and ECMAScript regex dialects differ, and one field's regex would be two rules free to disagree.
 - **`license` / `author` / `homepage` / `attribution`**: credit, shown on the public About page (§12.6). All optional and **never validated** — a plugin written before these existed must keep loading, and an oddly-spelled licence is still a working plugin; credit is not a correctness concern. `attribution` is separate from `homepage` because "where this lives" and "who deserves credit for it" are not the same link: a plugin that borrows data, artwork or an upstream library should be able to say so without giving up its own page. Purely additive in both directions — the host ignores unknown manifest fields, and the SDK's `PluginManifest` type is documentation for an author's editor with no runtime effect, the host remaining the sole validator — so **no `platformApi` bump**, which matters because that check is an exact `major.minor` match and a bump would reject every installed plugin until each one re-released.
 
 ### 7.3 Slots & placements
@@ -262,21 +294,49 @@ public interface PluginContext {
     SchemaStore  schema();   // only present if the manifest declares schema
     PluginBlobs  blobs();    // only present if the manifest declares `blobs` (§11.1); null otherwise
     Tags         tags();     // only present if the manifest declares `tags` (§6.1.1); null otherwise
+    Users        users();    // only present if the manifest declares `identity` (§8.8); null otherwise
+    Notifier     notifier(); // only present if the manifest declares `notifications` (§17); null otherwise
+                             // `notifier`, not `notify`: Object.notify() is final in Java
+    CrossUserStore allUsers(); // only present if the manifest declares `data.readsAllUsers` (§7.2); null otherwise
     PluginConfig config();
     FeedAccess   feeds();
-    void onSchedule(Duration every, Runnable task); // ShedLock-wrapped
-}
+    void onSchedule(Supplier<Duration> every, Runnable task); // ShedLock-wrapped; period re-read per tick
+    default void onSchedule(Duration every, Runnable task);   // fixed cadence, captured once
+    default void onEpisodeReleased(Consumer<String> slug);    // a planned episode became RELEASED (0.18.0)
+    default void onEpisodePhaseChanged(BiConsumer<String, EpisodePhase> listener); // a write moved it (0.19.0)
+}   // The supplier form (platformApi 0.15.0) is what a configurable interval needs: the host consults it
+    // before every fire and reschedules when the answer changes, so an operator's edit takes effect within
+    // one old period instead of at the next restart. It is consulted, not trusted — null, a non-positive
+    // Duration or a throw leaves the task on the last period that was valid, and only the value at
+    // registration is strict. The host clamps to an operator-owned floor (`mosaicast.plugin-schedule
+    // .min-period`, default 10s): the period is a request, like the manifest's other numbers.
+    // onEpisodeReleased fires once a planned episode is released (§4.3, §5.3), after the commit, so a
+    // listener reads the released state. Each call runs off the releasing thread, and one that throws is
+    // logged in that plugin's log without affecting the others. Best effort: nothing is queued or retried,
+    // and a plugin that was not loaded misses it — it reconciles by reading `DisplaySnapshot.phase()`.
+    // onEpisodePhaseChanged (0.19.0) is the general case: it fires when a *write* changes an episode's
+    // derived phase — compared before and after the write at one instant — with the slug and the new
+    // phase: announce, an `announceAt` edit either way, every release path, a withdrawal, a withdrawn
+    // episode returning, and an episode that no longer exists (phase null): a cancelled plan, or the
+    // duplicate a match or a confirmed suggestion removed. The clock passing
+    // `announceAt` fires nothing, since no write happened and becoming visible late is harmless; becoming
+    // *hidden* late is a leak, which is why the write that hides an episode must tell plugins at once. Same
+    // delivery as onEpisodeReleased, and on a release those listeners run first.
+    // The snapshot carries `phase` and `announceAt` beside the placement fields (§4.2): filled on read
+    // from the identity layer, never stored.
 interface DocStore {
     <T> Optional<T> get(Scope scope, String key, Class<T> type);
     void            put(Scope scope, String key, Object value);
     boolean         delete(Scope scope, String key);          // idempotent
     List<DocEntry>  query(Scope scope, String keyPrefix);     // keyed: (key, value)
-    List<OwnedDocEntry> queryAcrossUsers(String keyPrefix);   // backend-only, read-only, no HTTP surface
 }   // Scope = (SITE|FEED|SEASON|EPISODE|USER, id)
     // USER is host-owned: its id is always the sentinel "me" and the host substitutes the authenticated
     // caller. A plugin cannot name another user's partition, and an anonymous caller has none.
     // A backend thread has no caller, so every DocStore method above throws UnsupportedOperationException
-    // for a USER scope — reads included. Aggregates go through queryAcrossUsers, which names each owner:
+    // for a USER scope — reads included. Aggregates go through allUsers(), which names each owner:
+interface CrossUserStore {
+    List<OwnedDocEntry> query(String keyPrefix);              // every USER partition; backend-only, read-only,
+}                                                             // no HTTP surface (was DocStore.queryAcrossUsers)
 record DocEntry(String key, JsonNode value) {}
 record OwnedDocEntry(UUID userId, String key, JsonNode value) {}   // userId is host-resolved, never client-supplied
 
@@ -312,13 +372,23 @@ The host mounts the custom element and sets `ctx`. This is the **entire** interf
 ```ts
 interface PluginContext {
   scope:    { type: 'site'|'feed'|'season'|'episode'; id: string };
-  episodes: string[];                 // EpisodeRef IDs in scope (resolved by the host)
-  episode?: { status: 'PLANNED'|'PUBLISHED'|'WITHDRAWN' }; // on episode scope
-  user:     { id: string; role: Role } | null;
+  episodes: string[];                 // EpisodeRef IDs in scope (resolved by the host, for this viewer:
+                                      // a quiet planned episode only for a podcaster or admin, §4.3)
+  episode?: { status: 'PLANNED'|'PUBLISHED'|'WITHDRAWN';   // on episode scope (§4.3):
+              phase: 'planned'|'upcoming'|'released'|'withdrawn';   // the derived phase (0.18.0)
+              announceAt?: string };  // ISO instant, while planned; a phase change hands over a new ctx
+  user:     { id: string; role: Role; displayName: string; avatarUrl: string } | null;
+  users:    UserDirectory | null;     // resolve(ids) → who the other UUIDs are; null unless the
+                                      // manifest declares `identity` (§8.8)
+  notify:   NotifyClient | null;      // send(userIds, message) to users this plugin already holds
+                                      // data for; null unless the manifest declares it (§17)
   api:      PluginApiClient;          // calls /api/plugins/<id>/* with auth token; rejections carry
-                                      // `status` + the RFC-7807 body, and getOrNull resolves 404 to null
-  docs:     DocClient;                // typed doc store over the same endpoints; never null (§7.6)
-  feeds:    FeedsClient;              // display(slug) / displayMany(slugs) — the frontend half of FeedAccess
+                                      // `status` + the RFC-7807 body, and getOrNull resolves absence to null
+  docs:     DocClient;                // typed doc store over the same endpoints, plus getMany(type, ids, keys);
+                                      // dedupes and remembers misses (§7.6); never null
+  feeds:    FeedsClient;              // display(slug) / displayMany(slugs) — the frontend half of FeedAccess;
+                                      // displayMany splits past 200 slugs and merges, never clamps (0.19.0)
+  sanitize(html: string | null | undefined): string;  // the shell's own HTML policy; never null
   schema:   SchemaClient | null;      // read-only; null unless the manifest declares a schema (§7.6)
   blobs:    BlobClient | null;        // upload/list/delete; null unless the manifest declares `blobs` (§11.1)
   tags:     TagsClient | null;        // null unless the manifest declares `tags` (§6.1.1)
@@ -334,12 +404,14 @@ interface PluginContext {
   translation: TranslationClient | null;  // host-mediated MT; null unless the manifest declares the kind
                                           // *and* a provider is configured — two reasons (§16)
   progress: { get(episodeId: string): Promise<number | null> };          // core listening progress, seconds (§6.5)
-  theme:    ThemeTokens;              // host colors/spacing as CSS variables
+  theme:    ThemeTokens;              // host colors as CSS variables, incl. accentText (§12.3)
 }
 ```
 **Important:** plugins *consume* filters, they don't *define* them. Filter axes (season, tags, sorting) belong to the host.
 
 **`ctx.feeds` is the one plugin surface with no read floor of its own**, and the exception is worth writing down because "every plugin surface is gated by the manifest floor" is otherwise a reliable rule. It returns host data the same visitor can already read from `/api/episodes/*`; it exists so a plugin need not know that URL shape, which is the argument §6.4 makes for `ctx.links`. What it must not become is a way to see *more* than the visitor can, so the host filters the answer: a `WITHDRAWN` or gated episode is **absent rather than redacted**, and `display()` deliberately cannot tell "no snapshot" from "not visible" — distinguishing them would confirm the existence of an episode this visitor was not shown.
+
+**`ctx.sanitize` is the shell's own policy, handed to plugins** (platformApi 0.16.0). A plugin renders HTML it did not write — a snapshot's `description` (§4.2), a podcaster's Markdown, a user's rich text — and without a sanctioned sanitizer it reached for a library's defaults. DOMPurify's defaults stop scripts but permit `<style>` and `style=`, and the plugin contract requires `style-src 'unsafe-inline'` (Web Components style their shadow roots), while `img-src` stays open to any `https:` origin for artwork: together that makes a stylesheet in someone else's HTML a full-viewport click-jacking overlay or attribute-selector CSS that exfiltrates form values. Both shipped plugins had exactly that. So the shell's allow/forbid lists live in the SDK as plain data (`FEED_HTML_POLICY`), the shell's own sanitizer imports them, and `ctx.sanitize` applies them: one policy, which a plugin cannot weaken by writing less code. It needs no declaration, because it grants nothing. **The lists are the whole policy, in both directions**: a library default that would widen them (DOMPurify keeps every `data-*` and `aria-*` attribute unless told otherwise) or narrow them (it holds non-URL attributes such as `lang` or `colspan` to the URI allow-list) is switched off, and the host's sanitizer is tested for identical output against the SDK test kit's `sanitizeLikeHost` — a plugin whose test passes in the kit sees the same result in production (core#232).
 
 **Rejections are typed.** The host attaches the HTTP status and the problem body to what `ctx.api` throws, because the contract already words two different 403s apart on purpose — the read floor refused you, versus this key is `backendOwned` (§7.2) — and before this a plugin could not read the distinction it had been given. `getOrNull` exists for the same reason in the other direction: "nothing saved yet" is the normal state of a doc-store key, and expressing it as a rejection meant every plugin wrote a `catch` that also swallowed the 500 and the network failure.
 
@@ -351,9 +423,11 @@ interface PluginContext {
 - **Access floor:** declared in the manifest (`"data"`, §7.2), never derived from slots. The `USER` scope is exempt from **both** floors — see below.
 - **Authorization is per plugin, not per document.** A floor says *who*, never *which key*: clearing `writableBy` grants every key in every **shared** scope (`SITE`/`FEED`/`SEASON`/`EPISODE`), including one another caller wrote, because nothing binds a shared document to its author. Two rules narrow that, and neither closes it in general.
   - **`data.backendOwned`** (§7.2) reserves the keys the plugin's *backend* authors. Without it a plugin cannot express "this key is mine": the host cannot tell a scheduled write from a `curl`, so any caller above the write floor could forge a value the backend computed — a site-wide aggregate, a per-episode count — and have it served to every visitor as though the plugin had produced it. Reads are untouched, since the point is to publish a value rather than hide it, and `ctx.store()` is unaffected — enforcement is on the HTTP surface only, so the `DocStore` contract does not change. It is **ignored for `USER` scopes**, even under a bare `*`: a backend cannot write a partition there at all, so reserving one would reserve it for nobody. A declaration does **not** remove a value a client wrote before it existed, so a plugin writes its computed keys in `register(ctx)` as well as on a schedule. A malformed entry **rejects the plugin at load** (§7.8) rather than being dropped — a dropped entry loads a plugin whose manifest claims a key is the backend's while the host enforces nothing, which is the worst way for a security declaration to fail.
+  - **`data.keyFloors`** (§7.2, platformApi 0.19.0) raises the floor of named keys: public numbers beside private bookkeeping, an admin-only setting beside podcaster-writable ones. **Raise-only** — a floor below the plugin's own (`readableBy` against the effective read floor, `writableBy` against the write floor), `writableBy: "anonymous"`, an empty `keys`, an entry with neither floor or a malformed selector **rejects the plugin at load**, for the reason `backendOwned` does. Where several entries match a key the **strictest** wins, per direction. A write is checked plugin floor → `backendOwned` → key floor, each with its own problem type (`…/problems/forbidden`, `…/backend-owned-key`, `…/key-floor`), so an author can tell which refused them. A single `GET`/`PUT`/`DELETE` below a key's floor is a **403**; a **listing** drops such keys *before* paging, so its totals count only what the reader may see; a **batch read** leaves them absent, like a miss. Ignored for `USER` scopes and for `ctx.store()`, like `backendOwned`. It is a minor bump rather than a silent addition because the host ignores unknown manifest keys: a host that predates it would load the plugin and serve its "private" keys at the plugin floor.
   - The **`USER` scope** gives per-user data a partition no request can name (below).
   - **What remains open:** an unreserved key in a shared scope still has no owner, so on a multi-podcaster install one tenant can overwrite or delete another's plugin data. Closing it needs per-record ownership, which needs an owner in the domain model — feeds do not have one yet (§5, roadmap §14). Until then a plugin that needs the guarantee reserves the key or keeps the data in `USER` scope, and a plugin author should know the host does not otherwise make it.
-- **Default store:** `plugin_data(plugin_id, scope_type, scope_id, key, value JSONB)` + GIN index. Scales comfortably to thousands in Postgres. Optional: a plugin declares **indexable fields** (expression index) as an escape hatch. Writes are **last-write-wins** — plugins needing stronger concurrency control model it in their data design. **Per-user data belongs in the `USER` scope, never in the key.** A key is client-supplied, so a convention like `mark:<userId>:cell` is an access-control decision the host cannot enforce: any caller above the plugin's read floor can address another user's key directly, and scope ids are public slugs, so nothing has to be guessed. The `USER` scope is addressed as `user/me` and resolved server-side from the session, so the partition a caller reaches is the only one they can name. **Neither floor applies to it.** `readableBy` does not, in either direction: no floor makes another user's partition readable, and none stands between a caller and their own. `writableBy` does not either — a write floor protects the *shared* surface, where one caller's write is visible to others and can overwrite theirs, and a `USER` partition is unshared by construction, so there is nobody to protect from it. Gating it would also re-create the coupling this rule exists to remove: a plugin needing a per-user feature would have to declare `writableBy: "fan"`, opening its *shared* scopes to fan writes — the same "one setting forced by an unrelated need" failure as the old minimum-across-slots read floor, moved to the write side. So any authenticated caller reads and writes their own `user/me` whatever the plugin declares; any other `user` id is a **400** (never a silent substitution) and an anonymous request a **401**, since there is no session to resolve. The partition is flat — one per user, not one per user *and* entity — so the entity goes in the key (`mark:<episodeSlug>:cell`). Aggregating across users is the backend's job via `queryAcrossUsers` (§7.4), not the client's: a summary each browser reports about itself is a summary of whatever users typed.
+- **Default store:** `plugin_data(plugin_id, scope_type, scope_id, key, value JSONB)` + GIN index. Scales comfortably to thousands in Postgres. Optional: a plugin declares **indexable fields** (expression index) as an escape hatch. Writes are **last-write-wins** — plugins needing stronger concurrency control model it in their data design. **Per-user data belongs in the `USER` scope, never in the key.** A key is client-supplied, so a convention like `mark:<userId>:cell` is an access-control decision the host cannot enforce: any caller above the plugin's read floor can address another user's key directly, and scope ids are public slugs, so nothing has to be guessed. The `USER` scope is addressed as `user/me` and resolved server-side from the session, so the partition a caller reaches is the only one they can name. **Neither floor applies to it.** `readableBy` does not, in either direction: no floor makes another user's partition readable, and none stands between a caller and their own. `writableBy` does not either — a write floor protects the *shared* surface, where one caller's write is visible to others and can overwrite theirs, and a `USER` partition is unshared by construction, so there is nobody to protect from it. Gating it would also re-create the coupling this rule exists to remove: a plugin needing a per-user feature would have to declare `writableBy: "fan"`, opening its *shared* scopes to fan writes — the same "one setting forced by an unrelated need" failure as the old minimum-across-slots read floor, moved to the write side. So any authenticated caller reads and writes their own `user/me` whatever the plugin declares; any other `user` id is a **400** (never a silent substitution) and an anonymous request a **401**, since there is no session to resolve. The partition is flat — one per user, not one per user *and* entity — so the entity goes in the key (`mark:<episodeSlug>:cell`). Aggregating across users is the backend's job via `ctx.allUsers()` (§7.4, declared as `data.readsAllUsers`), not the client's: a summary each browser reports about itself is a summary of whatever users typed.
+- **"Not set" is an answer, not an error.** An absent key answers **204**; **404** keeps its meaning for a wrong address (unknown or disabled plugin, unknown scope type, a scope naming nothing). Before this a miss was a 404, which no client could cache — on one real instance 98% of a session's plugin requests said nothing more than "not set", one key asked 178 times. A **batch read** — `GET /api/plugins/{id}/data/{scopeType}?ids=…&keys=…` → `{ scopeId: { key: value } }`, misses absent, at most 100 ids and 100 keys, the same floors per id — lets a page of cards ask once. The host's client promises, per plugin and signed-in identity: identical reads in flight share one request; a miss is remembered **briefly** — for a short while (30 s) and never across a navigation, batch misses included; the plugin's own writes forget the address they touched; hits are never cached; errors are never remembered — so a plugin needs no miss cache of its own. The memory is deliberately short: keys the plugin's backend writes on its schedule and keys another session writes start out unset and appear later, and a page-long memory hid them until a reload (core#237). What it exists for — re-render bursts milliseconds apart asking for the same key — all lands inside the window.
 - **Schema provider (for relational plugins like the wiki):** the manifest declares entities + indexed/FTS fields; the **platform** provisions dedicated, namespaced tables (`plugin_wiki_*`) via a **platform-managed migration runner** and cleans up on uninstall. (Implementation note: Flyway itself is static — dynamic per-plugin DDL is applied programmatically with the platform's own bookkeeping table; "never trust plugin DDL" still holds.) **The plugin never writes DDL.** Every plugin may use the mechanism; most declare nothing.
   ```json
   "storage": { "schema": { "page": {
@@ -367,7 +441,7 @@ interface PluginContext {
   GET /api/plugins/{id}/schema/{entity}/count?where=
   GET /api/plugins/{id}/schema/{entity}/{rowId}
   ```
-  A query is *described*, never written: `where=field:op:value` and `orderBy=field:asc|desc` name **declared** fields, the host resolves them against that plugin's own manifest and builds the statement, and every value is bound as a parameter — so this adds no injection surface over what `SchemaStore` already had. Values are read against the field's declared type, so a malformed one is a **400** rather than a driver error. Access is the same `data.readableBy` floor as the doc surface, and there is no `USER` exemption to make here because schema tables are per plugin and these paths carry no scope. An undeclared **entity** is a **404** (over HTTP it is a path segment, i.e. an address); an undeclared **field**, an unreadable value, or `search` on a field that is not `:fulltext` is a **400**. Paging follows the doc surface (`page` from 0, `size` 50, capped at 200).
+  A query is *described*, never written: `where=field:op:value` and `orderBy=field:asc|desc` name **declared** fields, the host resolves them against that plugin's own manifest and builds the statement, and every value is bound as a parameter — so this adds no injection surface over what `SchemaStore` already had. Values are read against the field's declared type, so a malformed one is a **400** rather than a driver error. Access is `storage.schemaReadableBy` when declared, otherwise the same `data.readableBy` floor as the doc surface (platformApi 0.19.0) — so a plugin whose tile is anonymous can keep per-user rows, or rows naming a quiet episode, from anonymous visitors, the reasoning that gave `blobs` its own floor. It gates all four paths alike. There is no `USER` exemption to make here because schema tables are per plugin and these paths carry no scope. An undeclared **entity** is a **404** (over HTTP it is a path segment, i.e. an address); an undeclared **field**, an unreadable value, or `search` on a field that is not `:fulltext` is a **400**. Paging follows the doc surface (`page` from 0, `size` 50, capped at 200).
 - **No schema writes over HTTP, and this shapes plugin design.** A v1 plugin authors no routes (§7.4), so no plugin code runs at request time — there is nowhere to enforce slug uniqueness, append a revision atomically, or reject malformed input. Exposing writes would hand clients direct row access with *no plugin code in the path*, which is worse than the doc store's position rather than better. The plugin's **backend stays the only writer of relational truth**: a frontend that must write puts a document in the doc store and the backend ingests it on its schedule. The consequence is that such a write is **eventually consistent** — an editor does not see its own save through `ctx.schema` until the next tick, and a plugin with an editing UI (the wiki) must design for that with an optimistic render or an explicit saving state. Changing this needs a request-time plugin hook, which is a v1-contract decision and not a gap to be filled quietly.
 - **Not rate-limited.** `GET /api/plugins/**` is outside the rate limiter, which covers auth and upload paths, so an anonymous full-text search is capped only by `size`. Same posture as the doc-store list endpoint — but full-text is more expensive per call, so an operator exposing a large corpus should expect to front it.
 
@@ -389,10 +463,13 @@ Spring Security `oauth2Login`, **social-only to start**: Discord (clean OAuth2),
 
 ### 8.2 Model
 ```
-User           (id UUID, display_name, avatar_url, role, created_at)
-  └─ LinkedIdentity (provider, external_id, email, email_verified, PK(provider, external_id))
+User           (id UUID, display_name, display_key, avatar_provider, role, created_at)
+  ├─ LinkedIdentity  (provider, external_id, email, email_verified, avatar_ref, PK(provider, external_id))
+  └─ UserNameHistory (user_id, name, set_at, set_by)
 ```
 The stable key is `(provider, external_id)`, **not** the email. Keep the Discord `external_id` (future: bot/role sync).
+
+`display_name` is what a reader sees and `display_key` its canonical form (§8.6); `avatar_provider` names the linked identity a picture is pulled from, or is null (§8.7). **Neither is identity.** A document, a log line, a plugin's rows and an erasure all key on the UUID, which never changes — the name is a label the person is free to replace.
 
 ### 8.3 Account merging (security rule)
 On login `(provider P, external_id E, email Q, verified V)`:
@@ -408,7 +485,51 @@ In short: **auto-link only with two verified emails or a logged-in user, otherwi
 - **httpOnly cookie + server-side session** (Spring Session). **No JWT** (revoke/ban/role change must take effect immediately). In-memory in v1 → **Redis from v3** (app instances stay stateless). Cookie sessions require **CSRF protection** (Spring's `XSRF-TOKEN` cookie pattern for the SPA) and `SameSite=Lax`.
 - RBAC, `role` on the `User`: **ADMIN** (site config, users, plugin activation) · **PODCASTER** (bingos, wiki, episodes, feeds/Patreon sources, planned episodes) · **FAN** (fill in/view). Anonymous: read only.
 - Bootstrap admin via env on first start; afterwards the admin promotes fans → podcasters.
-- **Personal access tokens** (podcaster-scoped) for automation (e.g. MAT upload).
+- **Personal access tokens** (podcaster-scoped) for automation (e.g. MAT upload, planning episodes from a CMS, §4.3).
+
+### 8.6 Display name
+Prefilled from the provider at account creation and **never overwritten by a later login** — a name someone chose is not a cache of their Discord profile, and with several identities linked (§8.3) there is no non-arbitrary answer to which provider's name would win. From settings they may change it.
+
+- **The host owns the key.** `display_key` is the canonicalised form — NFKC, zero-width stripped, whitespace collapsed, confusables folded, casefolded — and uniqueness is enforced on *it*, while `display_name` keeps the spelling that was typed. The same rule as the tag vocabulary (§6.1.1) and for the same reason: converge the spellings without lower-casing what a visitor reads.
+- **Unique on the key**, because the display name is the only human-readable identity the site puts in front of other people, and a leaderboard where a fan can appear as the podcaster is worth an index. It is not a defence against lookalikes — folding confusables raises the cost, it does not close the class — which is why the answer to impersonation is §8.6.1 and not a better filter. Existing rows were prefilled from providers that never promised uniqueness, so the migration that adds the index **must resolve collisions first**.
+- Refused: reserved names (`admin`, `system`, `moderator`, the site's own), and a word list held **in configuration rather than code**, because an operator's language and jurisdiction are not ours to guess and self-hosters need their own. Matching runs on `display_key`, so the normalisation that serves uniqueness serves the filter too — one function, two callers. Treat it as a speed bump: word lists lose to leetspeak and to compounds, and they produce false positives. The control is §8.6.1.
+- Renames are **rate-limited** and recorded in `UserNameHistory`. That history is personal data: retention-capped and erased with the account, or the mechanism that lets someone shed a name becomes a permanent record of every name they tried to leave behind.
+
+#### 8.6.1 Moderation: revert, not rename
+An admin may **revert** a display name. An admin may not **set** one. The distinction is the whole design: an admin who never types the string cannot choose it, cannot use it to mock or to impersonate, and cannot be accused of having done either — and the act stays available to every operator without anyone having to write a policy about what an admin is allowed to type into someone else's profile.
+
+- Revert targets the previous **self-chosen** name in `UserNameHistory`, walking further back if that one was itself reverted. The floor is a **host-generated neutral name** derived from the UUID (`Listener 4f2a`), so there is always a terminal state and never an account without a name.
+- A revert **freezes renaming** for a period. Without that the user renames straight back and the act meant nothing.
+- **Admin only, not podcaster.** PODCASTER is a content role (§8.5); on an install with two of them, "every podcaster may rename any listener" is a grant nobody asked for and no boundary can express (§14, feed ownership). Podcasters report.
+- Reverts are logged like role changes (§8.5), and **the user is told** — a name that changes with no explanation reads as a bug or a break-in. The notice is a fixed system message rather than admin-authored text, for the same reason the admin does not type the name.
+
+### 8.7 Avatars
+Everyone starts with a **generated avatar**: an initial over a colour derived from the user UUID, drawn from the theme tokens so it is right in light and dark and re-themes with the site (§12.3). It costs no bytes, no storage and no CSP widening, and one mechanism covers every case that would otherwise each need an answer — a provider that has no avatars at all, a provider avatar that is simply absent, an account that has re-anonymised, and a user who has been deleted (§12.8).
+
+From settings a user may instead **pick one linked identity to pull their picture from** (§8.4). `LinkedIdentity.avatar_ref` holds that provider's own reference, refreshed on each login with it; `User.avatar_provider` names the chosen one, null meaning generated. Unlinking an identity — or erasing the account — **clears `avatar_provider`**, since a picture pulled from an identity that is gone is a dangling fetch.
+
+**The picture is always served by the host, never linked to.** `GET /api/users/{id}/avatar` answers bytes.
+
+- **A redirect would defeat the entire point.** Discord's avatar URL contains the Discord snowflake — the `external_id` §8.2 deliberately keeps server-side — so a `302` publishes the identifier social login was supposed to hold back, to anyone who reads the page source, and hands the CDN a hit from every visitor's browser. Proxy the bytes.
+- **Nothing attacker-influenced reaches the fetch.** The URL is composed in code from the provider and the stored ref, so the host is a constant per provider and there is no SSRF to filter rather than a filter to get right.
+- **Cached in memory, never stored.** A picture the host keeps a copy of is a picture the host must moderate, retain and erase. TTL, so a changed provider avatar propagates; the cache bounded by **total bytes, not entry count**; a per-image byte cap; and failures cached too, briefly, or a single 404 behind a leaderboard becomes one outbound fetch per page view. Changing or unlinking the source **evicts immediately**. An `ETag` over `(avatar_provider, avatar_ref)` makes a cold start after a restart cost revalidations instead of refetches.
+- Response content type whitelisted against an image list, `nosniff`, no provider headers passed through, no redirects followed.
+
+**Uploads are deliberately absent.** Accepting arbitrary images means owning image moderation — and one illegal upload is a legal event, not a support ticket — plus decode-and-re-encode, dimension and decompression-bomb guards, and inheriting all of it to every self-hoster. Generated avatars and provider pictures meet the need without opening that.
+
+### 8.8 What a plugin sees of a user
+§10 still holds: the host resolves access and `ctx.user` stays slim. But the cross-user read (`ctx.allUsers()`, §7.4) hands a backend `OwnedDocEntry(userId, …)` and nothing more, so a plugin that aggregates across users — a bingo leaderboard, the case this is written for — holds UUIDs and has no way to render a person. The gap is filled with a **lookup, not a wider `ctx.user`**:
+
+```ts
+interface UserDirectory { resolve(ids: string[]): Promise<UserRef[]>; }
+type UserRef = { id: string; displayName: string; avatarUrl: string; role: Role };
+```
+`Users users()` is the backend twin (§7.4), and an `identity` block in the manifest gates both — declared, never derived, like `data`, `blobs`, `tags` and `external` (§7.2). Absent means `ctx.users` is null and the endpoint 404s.
+
+- **Never email, provider or `external_id`.** `avatarUrl` is the host's own `/api/users/{id}/avatar` (§8.7), which is the only reason a picture can be handed out here at all.
+- **It resolves, it does not enumerate.** There is no list endpoint. A plugin can ask only about ids it already holds, and it only comes by them through its own scope.
+- **Plugins store UUIDs and resolve at render; they do not store names.** A display name copied into a plugin's store survives the rename meant to shed it and the erasure meant to end it, and §12.8 cannot reach it — core provisioned those columns without ever learning which one is a person. The rule is written here because the host cannot enforce it.
+- **Absent rather than redacted** for an id that is unknown, erased or pseudonymised — the shape `ctx.feeds` already uses (§7.5). It is also what lets a leaderboard row outlive its author as §13 requires: the aggregate stays, the person becomes a placeholder the plugin renders.
 
 ---
 
@@ -430,7 +551,7 @@ Patreon appears in **three mutually independent places**; they die independently
 Each `EpisodeRef.access = PUBLIC | TIER(ref)`. **The host makes the access decision, not the plugin.** At render time `unlocked = userEntitlement.satisfies(access)`.
 - v1 (RSS only): everything PUBLIC.
 - v2: free Patreon episodes PUBLIC (always visible); paid ones as a **locked stub** with a "view on Patreon" CTA, real link on matching tier.
-- PLANNED episodes: "upcoming episode" stub, no audio, bingo open.
+- PLANNED episodes: "upcoming episode" stub, no audio, bingo open — once announced. A quiet one (§4.3) is not gated but **absent**: to anyone below podcaster it does not exist, which is a visibility rule the host applies before any access decision.
 Plugins only get the episode list the user may see; `ctx.user` stays slim.
 
 ---
@@ -480,8 +601,8 @@ DELETE /api/plugins/{id}/blob/{ref}   idempotent
   - The **hard ceiling** exists because ADMIN is a role inside the application (§8.5) while the properties are infrastructure. Where those are not the same person, an operator needs a bound the UI cannot cross; where they are, leaving it unset is right. A grant past it is **clamped, not refused**, and the clamped value is what is stored — an admin is never shown a number that means something else.
   - **The MIME allow-list is not grantable.** No admin decision widens it, because what a file may *be* is a security question (§12.2) rather than a capacity one.
   - Storage is **per plugin**: a wiki accumulating diagrams and a bingo plugin storing nothing have no reason to share a ceiling, and "the wiki has outgrown its space" is an ordinary operational event rather than a redeploy.
-- **Writes are the point here, and that is why this differs from §7.6.** The case against schema writes over HTTP is that no plugin code runs at request time to enforce a relational invariant. A file has none, so `data.writableBy` plus a quota is the whole authorization story. Reads take `data.readableBy` — one floor pair, three surfaces. `backendOwned` does not apply: it reserves *keys*, and a caller never names one — a ref is a UUID the host mints per upload, so an upload can never overwrite an existing file, including another tenant's.
-- **What the bytes say is what gets stored**, in this order: size, the declared type, the *actual* type read from the leading bytes, then the quota. That order is why the SDK's `blobs.upload` normalises the **declared** type before sending: Firefox reads `File.type` from the OS MIME database and hands over `''` where that lookup fails, so `FormData` sends `application/octet-stream` and a valid PNG is refused on its declared type before anything sniffs it — in one browser only. Guessing there is safe precisely because this order keeps the byte check afterwards, so a wrong guess becomes the same 415 rather than a stored file of the wrong kind. Reordering these steps would take that safety with it. One shared sniffer serves branding and plugins, and **SVG has no case in it** — that is what makes it unstorable rather than merely undeclared (§12.2). Refusals are **415** (type) and **413** (size or quota), worded apart because the fixes differ.
+- **Writes are the point here, and that is why this differs from §7.6.** The case against schema writes over HTTP is that no plugin code runs at request time to enforce a relational invariant. A file has none, so a write floor plus a quota is the whole authorization story. Files take the **`data` floors** unless the `blobs` block declares its own `readableBy` / `writableBy` — same vocabulary, and a write may not be `anonymous`. That default is right for a wiki, whose diagrams are as public as its pages; the override is for a plugin whose uploads are **inputs** rather than published content (raw analysis archives behind public numbers), which would otherwise be published along with the numbers. A read floor above `anonymous` also makes every download `Cache-Control: private`. `backendOwned` does not apply: it reserves *keys*, and a caller never names one — a ref is a UUID the host mints per upload, so an upload can never overwrite an existing file, including another tenant's.
+- **What the bytes say is what gets stored**, in this order: size, the declared type, the *actual* type read from the leading bytes, then the quota. That order is why the SDK's `blobs.upload` normalises the **declared** type before sending: Firefox reads `File.type` from the OS MIME database and hands over `''` where that lookup fails, so `FormData` sends `application/octet-stream` and a valid PNG is refused on its declared type before anything sniffs it — in one browser only. Guessing there is safe precisely because this order keeps the byte check afterwards, so a wrong guess becomes the same 415 rather than a stored file of the wrong kind. Reordering these steps would take that safety with it. One shared sniffer serves branding and plugins, and **SVG has no case in it** — that is what makes it unstorable rather than merely undeclared (§12.2). **ZIP** is recognised and in the default allow-list: it carries no active content, the browser aliases (`application/x-zip-compressed`, …) are folded into `application/zip` on the declared type, and opening an archive safely (zip bombs, zip slip) is the job of the plugin that reads it (§13). Images and audio are served `inline`; everything else as an `attachment`, so a file that is not for display is a download everywhere. Refusals are **415** (type) and **413** (size or quota), worded apart because the fixes differ.
 - **Purge removes files** alongside documents and schema tables (§7.8), matched on the namespace exactly rather than on a name prefix.
 - Blobs are served **same-origin** under `/api/`, so a plugin rendering its own upload needs no CSP host and makes no consent decision — which an external image URL cannot say. This is the answer to the asymmetry above, not merely a workaround for it.
 
@@ -506,7 +627,8 @@ Via `BlobStore` (namespace `branding/`). Served at `/branding/logo`, `/branding/
 **Security:** uploaded **SVGs are an XSS vector** → either sanitize server-side or restrict to raster (PNG/ICO) and serve with `Content-Disposition`/CSP.
 
 ### 12.3 Light/dark + seed generator
-- **Semantic tokens** as CSS custom properties: `--mc-bg, --mc-surface, --mc-text, --mc-text-muted, --mc-accent, --mc-accent-contrast, --mc-border` (+ accent-2). Light/dark = two value sets, `data-theme` on the root. **Shell AND plugins read the same properties** → they re-theme automatically.
+- **Semantic tokens** as CSS custom properties: `--mc-bg, --mc-surface, --mc-text, --mc-text-muted, --mc-accent, --mc-accent-contrast, --mc-accent-text, --mc-border` (+ accent-2). Light/dark = two value sets, `data-theme` on the root. **Shell AND plugins read the same properties** → they re-theme automatically.
+- **`--mc-accent` is for fills; `--mc-accent-text` is for text, links and focus rings.** The accent is the admin's seed, paired with `--mc-accent-contrast` for whatever sits on top of it, and is not contrast-checked against the page — a pale seed such as `#FFF176` measured 1.12:1 as link text. `--mc-accent-text` is the same accent clamped to WCAG AA (4.5:1) against both `--mc-bg` and `--mc-surface`. It is set on `:root`, so it reaches plugins through inheritance, and since platformApi 0.16.0 it is also `ctx.theme.accentText`. Colouring text with `--mc-accent` is a bug in the shell and in a plugin alike.
 - **Icons ride the same channel: `--mc-icon-*`.** The shell's icon set is generated from a whitelist and a deliberate subset is published as custom properties, so a plugin's Web Component draws the shell's icons with **no SDK import, no `platformApi` bump and no version skew** — a plugin built against an older SDK picks up an icon added here the day it lands. Consumed as a **mask**, never as `background-image`, so the icon takes the caller's own colour and re-themes with everything else:
   ```css
   mask-image: var(--mc-icon-close); mask-size: contain; background: currentColor;
@@ -520,7 +642,7 @@ Via `BlobStore` (namespace `branding/`). Served at `/branding/logo`, `/branding/
 On logo upload, **suggest** an accent: for SVG parse the `fill` values (cleaner than rasterizing), for PNG quantize (k-means/median-cut, Vibrant) → **not** the most frequent, but the **most saturated** color. Feeds the same seed generator. **Extract → suggest → admin confirms/adjusts.** Never auto-lock fully.
 
 ### 12.5 Consent (platform service)
-Strictly necessary cookies (session/CSRF/LB) need **no** consent → the core runs banner-free. Plugins that load third-party content with cookies declare categories + external sources in the manifest → the host generates the cookie/privacy notice + admin audit from that. A plugin loads consent-requiring resources only after `ctx.consent.has(cat)`, before that a click-to-load placeholder. Self-host fonts, cookieless analytics (Plausible/Umami).
+Strictly necessary cookies (session/CSRF/LB) need **no** consent → the core runs banner-free. Plugins that load third-party content with cookies declare **services** in the manifest (§7.2) — provider, category, hosts, what each stores — → the host generates the cookie/privacy notice + admin audit from that. The **category** is the thing a visitor consents to, so it is the one plugin-authored string that cannot fall back to a developer key. The host names its own (`necessary`, `functional`, `analytics`); a category a plugin introduces is named by that plugin's `consent.categoryLabels` (label + hint, localized), a host category may not be relabelled, and when two plugins label one category the lowest plugin id wins so load order never decides what a visitor is asked. An unlabelled plugin category is shown inside a generic localized phrase ("Other services: social") — never as the bare id. A plugin loads consent-requiring resources only after `ctx.consent.has(cat)`, before that a click-to-load placeholder. Self-host fonts, cookieless analytics (Plausible/Umami).
 
 **Server-side external services are out of scope here.** A call to a configured provider (§16) happens on the server, so no browser request reaches it, nothing enters `connect-src`, and no consent category applies. The question that *is* real — whether operator-submitted content leaves the EU — is an operator decision surfaced in admin before a provider is selected, not a visitor prompt.
 
@@ -528,8 +650,8 @@ Strictly necessary cookies (session/CSRF/LB) need **no** consent → the core ru
 
 ### 12.6 Legal pages (mini-CMS, jurisdiction-agnostic)
 Publicly operated sites need jurisdiction-specific legal documents (e.g. Germany: Impressum + Datenschutzerklärung; other countries: other sets). Core therefore ships a **generic legal-pages mechanism instead of hardcoded documents**:
-- Admin creates any number of **static pages** (markdown; slug, title), shown automatically as **footer links**, order sortable.
-- Pages are **translatable per locale** (§12.7): one logical page, one markdown body per language, served in the active UI locale with fallback to the default locale.
+- Admin creates any number of **static pages** (markdown; slug, title), shown automatically as **footer links**, order sortable. The slug is a URL segment (`/legal/{slug}`, the API path, the sitemap), so it follows the site's slug grammar — lowercase letters and digits in hyphen-separated runs, at most 64 characters — and anything else is refused at creation rather than stored as a page no link can reach.
+- Pages are **translatable per locale** (§12.7): one logical page, one markdown body per language, served in the active UI locale with fallback to the default locale, and — when the page has neither — to whichever language it is written in: a reader would rather have the imprint in another language than no imprint, and a page that exists must not answer 404. Crawlers are still told only the truth: `hreflang` names the languages a page actually has (§6.6).
 - A translation may be **machine-drafted, never machine-published** (§16). The prefill action returns an unsaved draft the admin reads, edits and saves themselves. This section ships the mechanism and deliberately no legal texts because a policy nobody read is false safety; writing a machine translation straight into the table would be that same failure with extra steps.
 - A page can carry a **role marker** (`privacy`, `imprint`, `terms`, …); the consent service (§12.5) links to the page marked `privacy`.
 - Markdown is rendered sanitized (same care as wiki content).
@@ -565,14 +687,34 @@ Core owns what it stored: identities, tokens, listening progress, and the `USER`
 - **Outstanding erasures are retried and visible in admin**, and settle immediately when a switched-off plugin is switched back on. A plugin that is *rejected* is asked only if it has ever stored anything: it did not run this boot, but "rejected" is also what a working plugin becomes after a bad upgrade, and last week's rows do not disappear because a manifest stopped parsing.
 - **The API answers a receipt, not a 204** — complete, plus the plugins that have not finished. Reporting completion while a plugin still holds data would be the failure the whole record exists to prevent.
 
-`exportUser` is defaulted to empty so erasure could ship alone; the GDPR **data export** on the v2 roadmap hits the same wall and is meant to hang off the same code.
+`exportUser` was defaulted to empty so erasure could ship alone; the data export below hangs off the same code.
+
+#### 12.8.1 Data export
+A person can download everything the site holds about them (GDPR Art. 15 access, Art. 20 portability), including what every plugin holds, in a form that is useful to them — so a plugin hands over **files in its own format**, not a map core has to guess a format for.
+
+- **A job, not a response.** `POST /api/me/export` answers a **receipt** (`202`); the work runs off the request, because asking every plugin with a timeout each is not something a request should wait on. One export per account per interval (default a day, operator-configurable): an export walks every plugin, and a button pressed in a loop should not.
+- **Done means told.** When it finishes the person gets an in-app notification (§17) with a link to their account page, and the download is **one ZIP**, available only to that account and only for a limited time (default seven days), after which it is deleted. Admins see the jobs and each plugin's outcome — **never the ZIPs**: the point of the archive is that it is everything about one person.
+- **The layout:**
+  ```text
+  export-<date>.zip
+    README.txt                        what each part is, generated
+    core/account.json                 account, linked providers, name history, access tokens (never a secret)
+    core/listening.json               listening progress
+    core/notifications.json           the inbox
+    core/plugin-documents/<plugin>.json   USER-scope documents core holds on plugins' behalf (§7.6)
+    plugins/<id>/…                    whatever each plugin hands over, in its own format
+    outcome.json                      per plugin: complete | empty | failed | outstanding | not-supported
+  ```
+- **Plugins are asked the way erasure asks them, and nothing goes missing silently.** Every discovered plugin that could hold data gets an outcome **recorded before it is asked**. The order is the SDK's: `exportFiles` first; if that is empty, `exportUser`, whose non-empty map is written as `plugins/<id>/data.json`; if that is empty too the plugin holds nothing on this person (`empty`). A switched-off plugin, or a rejected one that has stored data (§12.8), cannot be asked and is **`outstanding`**; a handler that throws, runs past `UserExport.TIMEOUT` or hands over more than `UserExport.MAX_BYTES` is **`failed`** — never truncated, because a partial part reads as a complete one. A plugin with no `UserDataHandler` is **`not-supported`** rather than `empty`: core cannot know it holds nothing, only that it did not say. The limits are the SDK's constants; an operator may lower them, never raise them. A plugin includes only this person's data, which the SDK tells it.
+- **Erasure takes the exports with it.** An archive of a deleted account is that account's data outliving it.
+- **Not here:** an admin full-site export (that is database tooling), and import — a plugin that wants a round trip reads its own format back itself.
 
 ## 13. Non-Functional
 
 - **Scaling v3:** app instances **stateless** (Redis session, DB as the only truth), periodic jobs **ShedLock**. Moving to multiple instances behind an LB = config, not a rewrite.
 - **Observability:** Spring **Actuator** `health`/`info` (compose healthcheck + uptime monitoring hook), structured logging. Nothing fancier in v1.
 - **API conventions:** the REST API is **internal** in v1 — the SDK is the only public contract, so no API-versioning machinery. Errors as **RFC 7807** `application/problem+json` (stable `type` codes; the UI translates) — including the external-service vocabulary listed in §16. **List endpoints paginate from day one.**
-- **GDPR:** store minimal (provider, external_id, optional email/name/avatar), no passwords. On account deletion **pseudonymize** public bingo contributions (cut the identity link, aggregates/leaderboard stay correct), don't hard delete — the mechanism is §12.8, because bingo is a plugin and core cannot keep that promise on its own. Not a lawyer — have the privacy policy reviewed.
+- **GDPR:** store minimal (provider, external_id, optional email/name, and for the avatar a *reference* rather than a picture — §8.7), no passwords. Name history is retention-capped and dies with the account (§8.6). On account deletion **pseudonymize** public bingo contributions (cut the identity link, aggregates/leaderboard stay correct), don't hard delete — the mechanism is §12.8, because bingo is a plugin and core cannot keep that promise on its own. Not a lawyer — have the privacy policy reviewed.
 - **Security:** creator/OAuth tokens encrypted at rest — `MOSAICAST_ENCRYPTION_KEY` is wired and used for admin-entered external-service credentials (§16); absent, such values are stored in the clear with a startup warning and an admin badge, because refusing to boot would take a site down over a feature it may not use. Outbound requests to **admin-supplied service URLs** are gated by an exact-origin private allow-list, distinct from and **not** a widening of `mosaicast.feed.allow-private-targets`. SVG sanitizing. Presigned URLs for gated audio. **Baseline security headers** (CSP, X-Content-Type-Options, Referrer-Policy). **Upload limits** (max body size; archives additionally guarded against zip-slip and zip bombs — see the stats brief). **Basic rate limiting** on auth endpoints and uploads.
 - **Deployment:** Docker Compose (app, postgres, caddy/traefik; redis from v3). Secrets via `.env`, not committed. **Backups from day one:** nightly `pg_dump` of the database (host cron or sidecar) + keeping a copy off the VPS; test a restore once.
 
@@ -586,15 +728,15 @@ Tests are **layered by tier**, not dogmatically blanket. Focus on risk and contr
 
 ### Test kit (in the SDK, so plugin testing is trivial)
 The contract ships its test doubles. Production plugin code does **not** bundle them (separate artifact / dev subpath).
-- **Java `plugin-testkit`** (own artifact, `testImplementation` only): `FakePluginContext` with `InMemoryDocStore`, `FakeFeedAccess(Map<Scope,List<String>>)`, `MapPluginConfig`, synchronous `onSchedule`. → test a plugin backend without infrastructure: build the fake context, call `register`, assert store contents.
-- **TS `@mosaicast/plugin-sdk/testing`** (dev subpath): `makeMockCtx(overrides)` returns a `PluginContext` with a fake `api` (records calls / canned responses), in-memory `consent`/`filter`/`player`, theme tokens. → mount the Web Component with the mock ctx, assert DOM.
+- **Java `plugin-testkit`** (own artifact, `testImplementation` only): `FakePluginContext` with `InMemoryDocStore`, `FakeFeedAccess(Map<Scope,List<String>>)`, `MapPluginConfig`, synchronous `onSchedule`. → test a plugin backend without infrastructure: build the fake context, call `register`, assert store contents. Capabilities default to **absent**, as the host's do without a declaration — `allUsers()` stays `null` until `withReadsAllUsers()`, so a backend that forgot its manifest declaration fails in its tests, not at its first production load.
+- **TS `@mosaicast/plugin-sdk/testing`** (dev subpath): `makeMockCtx(overrides)` returns a `PluginContext` with a fake `api` (records calls / canned responses), in-memory `consent`/`filter`/`player`, theme tokens. → mount the Web Component with the mock ctx, assert DOM. `ctx.sanitize` is `sanitizeLikeHost` — the same `FEED_HTML_POLICY` walked over a parsed tree — so a component test sees the removals the host makes; the docs double records its calls, so "one batch, not one read per card" is assertable.
 
 ---
 
 ## 14. Version Roadmap
 
 - **v1:** RSS feeds, unified feed + filter, season, EpisodeRef/snapshot, PLANNED lifecycle, social login (Discord) + account merging, RBAC, SiteConfig/branding + theming/seed, BlobStore (Postgres), plugin system, sequential nav + RelatedProvider (tags/season/fuzzy), plugins: **bingo, stats, wiki**.
-- **v2:** Patreon (login/FeedSource/tier), tier gating, **feed ownership** (below), dedup/merge UI (fuzzy), logo→theme stage 2, embedding-related (`pgvector`), transcript display (MAT transcripts are already uploaded — accessibility + SEO nearly for free), Podcasting 2.0 namespace (`<podcast:chapters/transcript/funding>`), first-party cookieless analytics, GDPR data export, oEmbed embed player, **external services** (§16: translation shipped first, with transcription/TTS/embeddings the follow-on kinds the surface is shaped for).
+- **v2:** Patreon (login/FeedSource/tier), tier gating, **feed ownership** (below), dedup/merge UI (fuzzy), logo→theme stage 2, embedding-related (`pgvector`), transcript display (MAT transcripts are already uploaded — accessibility + SEO nearly for free), Podcasting 2.0 namespace (`<podcast:chapters/transcript/funding>`), first-party cookieless analytics, oEmbed embed player, **external services** (§16: translation shipped first, with transcription/TTS/embeddings the follow-on kinds the surface is shaped for).
 - **v3:** Redis sessions/cache, multiple LB instances, multi-tenant preparation; far future: native audio host (BlobStore `audio/*` → S3, own FeedSource, custom RSS).
 
 **Feed ownership (v2).** A `Feed` has no owner, and **PODCASTER** is a single global role (§8.5): every podcaster can edit every feed, and — because the plugin doc store authorizes per plugin rather than per document (§7.6) — tamper with plugin data on any feed, season or episode. On a single-podcaster install that is invisible. The moment there are two, it is one tenant reaching another's, with no way to express the boundary.
@@ -627,3 +769,42 @@ A generic surface for services this instance may use but does not run: **one *ki
 - **Machine output is a draft.** Anything stored from it is marked as such and confirmed by a person (§12.6).
 - **A plugin declares what it uses.** The manifest's `external` block (§7.2) names the kinds (`external.kinds`) and the lowest role that may trigger a call from the plugin's UI (`external.usedBy`, default `podcaster`). An undeclared kind is **`null` on the plugin's context and 404 on its endpoint** — the shape `blobs` and `tags` already have — and it is that **independently of whether a provider is configured**, because the manifest is checked first: a plugin that never asked must not be able to read off an error code whether this instance pays for translation. It is deliberately *not* `external-no-provider`, which tells a caller to go ask their admin about something no admin can grant. The declaration exists here and not only for storage because the browser half of this surface spends money: `translate()` in a page means anyone who can load that page can bill a metered API, and the pipeline's rate limit keys on kind and provider, so an undeclared caller would exhaust the site's budget with nothing recording which plugin did it. **The role floor is a property of the browser endpoint only** — a backend call happens in `register` or on a timer and has no caller to have a role. `usedBy: "anonymous"` is legal and almost always wrong; a metered provider behind an anonymous floor is an open spending endpoint.
 - **Failure vocabulary**, each with its own status and stable problem type, because a caller that cannot tell them apart cannot act on any of them: `external-no-provider` (409), `external-provider-misconfigured` (409), `external-busy` (503), `external-rate-limited` (429), `external-timeout` (504), `external-provider-failed` (502).
+
+---
+
+## 17. Notifications
+
+Three things need to tell a user something and none of them can: a display name reverted by an admin (§8.6.1) changes silently and reads as a break-in; an admin has no way to warn someone short of removing them; and a plugin that finishes a long-running thing a user took part in — a bingo resolving, the case this is written for — can only hope they come back and look. One inbox serves all three.
+
+**In-app only.** The emails in `LinkedIdentity` were collected to establish identity (§8.2), and sending to them is a *different purpose* — with opt-in, bounce handling, deliverability and an unsubscribe path behind it. Nothing here presumes it never happens; it is simply not this.
+
+```
+Notification (id, user_id, source, kind, payload JSONB, created_at, read_at)
+             source: system | admin | plugin:<id>
+```
+
+- **The user is the addressee, so the host is the sender.** A notification is written by core on behalf of a source, never handed to a delivery mechanism a plugin controls. Rate limits, caps and retention are therefore host properties and there is nowhere for a plugin to hold them.
+- **`system` messages are fixed kinds, not text.** The revert notice (§8.6.1) names a kind and the shell translates it. An admin who cannot type the name must not be able to type the explanation either, or the restraint in §8.6.1 is one message away from being undone.
+- **`admin` messages are free text**, because a warning that cannot say what it is about is not a warning. They are attributable and logged like role changes (§8.5), and read state is meaningful for them in a way it is not elsewhere: "they were told" is the point.
+
+### 17.1 What a plugin may do
+```ts
+interface NotifyClient { send(userIds: string[], msg: NotifyMessage): Promise<string[]>; }
+type NotifyMessage = { text: Record<string, string>; link?: string };   // locale → finished sentence
+```
+`Notifier notifier()` is the backend twin (§7.4) and is where nearly all real use lives — the thing worth announcing usually finishes on a timer, not in someone's browser. **It is `notifier()` in Java and `ctx.notify` in TypeScript**, and the asymmetry is forced: `Object.notify()` is `final`, so no Java interface may declare that name.
+
+**`send` answers who was actually notified**, not `void`. The eligibility rule below guarantees partial sends — an erased account (§12.8) is the ordinary case — and a write whose partial failure is invisible degrades in silence: a plugin working from a stale participant list would look exactly like one working perfectly.
+
+This is the **first plugin surface that writes into another user's experience**. Everything else a plugin touches is its own scope or the current visitor's (§7.6). Unbounded, it is a spam cannon pointed at the whole user list, so:
+
+- **A plugin may only notify users it already holds `USER`-scope data for.** Host-enforced against the same partitions the cross-user read spans (§7.4) — whether or not the plugin declared `data.readsAllUsers` — needing no new concept: bingo may write to its participants because participants have rows, and no plugin can reach a user who never touched it. The rule survives the surface it was written for — a comments plugin later notifies a thread's participants, who are exactly the users it stores rows for.
+- **Rate limits are the host's**, per plugin per recipient per window plus a ceiling across all recipients, both capped by the operator over what the manifest asked for. A limit a plugin enforces is a limit a plugin can drop.
+- **Text is third-party and user-visible.** A plugin sends **one finished sentence per locale**, and the shell picks when it draws the bell. A single rendered string would freeze the language at send time, which breaks §12.7 on the surface where it is most obviously wrong: a notification is written on a timer and read days later by someone whose shell may have changed language since.
+  - *Not a translation key*, which is what this section first specified — nothing can resolve one. A plugin's catalogs ship inside its **frontend bundle** (§12.7) and load when its Web Component mounts; the bell is shell chrome and renders on pages where that never happens. There is no plugin-scoped catalog endpoint and no manifest field naming one, so a key would reach a reader as the literal string. A key is the better design and may yet arrive — it needs a plugin catalog surface first, which is a larger piece of work than the notification it would serve.
+  - The map must carry `en`: §12.7 makes English the one language a site cannot switch off, so it is the only safe terminal fallback. Requiring the *site's* default instead would refuse a perfectly good plugin that does not happen to ship that language. The honest cost is that the set of languages is fixed when a notification is sent, so one added later cannot appear in a message already written.
+  - Rendered as text, never HTML, with length caps.
+- **`link` is host-validated and internal** — a `ctx.links`-shaped target or a subpath under `/p/<pluginId>/` (§6.4). A notification is chrome the site is speaking through, and a plugin that can point it off-site is a plugin that can phish the site's own users with the site's own voice.
+
+### 17.2 Lifecycle
+Notifications are user data. They are erased with the account (§12.8) rather than left keyed to a UUID nobody can resolve, a plugin's notifications go when the plugin's data does, read ones are purged after a retention period and unread ones are capped per user — an inbox nobody empties is not a feature, and an unbounded one is a table that only grows.
