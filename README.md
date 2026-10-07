@@ -4,7 +4,7 @@
 > audio analysis, and chapter stats for the books you talk about. MAT is the first supported source.
 
 Part of **[Mosaicast](https://github.com/Mosaicast)**, an extensible website platform for podcasts. Status:
-**0.1.0, first release candidate**.
+**0.1.1**, the first release line (see [CHANGELOG](CHANGELOG.md)). Needs core 0.8.0 or newer.
 
 ![The stats page: totals, speaking time, per-episode charts, records and the most mentioned names](docs/screenshots/stats-page.png)
 
