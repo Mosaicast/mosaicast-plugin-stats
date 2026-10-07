@@ -27,7 +27,7 @@ describe('uploading', () => {
     const ctx = makeMockCtx({ blobs: limited(2) });
     const pauses: number[] = [];
     const slept: number[] = [];
-    const result = await uploadArchive(ctx, zip(), null, '', (s) => pauses.push(s), async (ms) => { slept.push(ms); });
+    const result = await uploadArchive(ctx, zip(), null, '', String, (s) => pauses.push(s), async (ms) => { slept.push(ms); });
     expect(result.state).toBe('queued');
     expect(pauses).toEqual([43, 43]);
     expect(slept).toEqual([43_000, 43_000]);
@@ -35,7 +35,7 @@ describe('uploading', () => {
 
   it('gives up after a few rounds', async () => {
     const ctx = makeMockCtx({ blobs: limited(99) });
-    const result = await uploadArchive(ctx, zip(), null, '', undefined, async () => {});
+    const result = await uploadArchive(ctx, zip(), null, '', String, undefined, async () => {});
     expect(result).toEqual({ state: 'failed', reason: 'upload.rateLimited' });
   });
 
