@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 (2026-10-07)
+
+- SDK 0.19.1, `platformApi` 0.19.1 (loads on any 0.19 host; core matches major.minor).
+- Upload size limits are shown in binary units through `i18n.bytes` ("Up to 20 MiB per file"), the same
+  numbers core's admin shows for plugin quotas. They said "MB" before while counting in MiB.
+- `docs/ARCHITECTURE.md` synced from core 0.8.2.
+
 ## 0.1.1 (2026-10-07)
 
 Dependency updates, no change in behaviour.

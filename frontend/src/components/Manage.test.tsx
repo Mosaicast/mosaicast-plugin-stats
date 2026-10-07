@@ -42,6 +42,7 @@ describe('Manage', () => {
     expect(Object.keys(docs.stored).filter((k) => k.includes('/cmd:'))).toEqual([]);
     expect(view.text()).toContain('Not a ZIP file');
     expect(view.text()).toMatch(/1 change in progress/);
+    expect(view.text()).toContain('Up to 1 KiB per file.'); // binary units, as core's admin shows quotas
   });
 
   it('queues a command only when a format is picked by hand', async () => {
@@ -77,7 +78,7 @@ describe('Manage', () => {
     const view = await mount(<Manage ctx={makeMockCtx({ user: podcaster, blobs })} />);
     await drop(view.host, [zip('big.zip')]);
     expect(blobs.uploads).toHaveLength(0);
-    expect(view.text()).toMatch(/Bigger than/);
+    expect(view.text()).toContain('Bigger than 4 bytes');
   });
 
   it('suggests the best episode and queues the assignment', async () => {

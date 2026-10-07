@@ -38,6 +38,8 @@ export function LoadingBar({ label }: { label: string }) {
 export interface Basics {
   t: PluginI18n['t'];
   plural: PluginI18n['plural'];
+  /** File sizes in binary units ("20 MiB"), as core's admin shows quotas. */
+  bytes: PluginI18n['bytes'];
   locale: string;
   who: People;
   /** The site's bundles (saved settings plus implicit defaults). */
@@ -79,6 +81,7 @@ export function useSiteData(ctx: PluginContext, reload = 0) {
     return {
       t,
       plural: i18n.plural.bind(i18n),
+      bytes: i18n.bytes.bind(i18n),
       locale: i18n.locale,
       who: people(settings, index ?? null, dark),
       bundles: resolveBundles(bundleSettings),

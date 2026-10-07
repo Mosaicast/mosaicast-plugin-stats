@@ -218,7 +218,7 @@ function Upload({ ctx, b, readers, quota, pending, onQueued }: { ctx: PluginCont
     // One at a time: a batch of 40 archives shouldn't open 40 uploads at once.
     for (const { id, file } of batch) {
       setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, status: { state: 'uploading' } } : f)));
-      const status = await uploadArchive(ctx, file, quota?.maxFileBytes ?? null, reader, (seconds) =>
+      const status = await uploadArchive(ctx, file, quota?.maxFileBytes ?? null, reader, b.bytes, (seconds) =>
         setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, status: { state: 'paused', seconds } } : f))));
       setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, status } : f)));
       if (status.state === 'queued') onQueued(status.ref);
@@ -251,7 +251,7 @@ function Upload({ ctx, b, readers, quota, pending, onQueued }: { ctx: PluginCont
         </div>
         {quota && (
           <p className="tiny muted" style={{ margin: '10px 0 0' }}>
-            {b.t('upload.limit', { max: fmt.decimal(quota.maxFileBytes / 1048576, b.locale, 0) })}
+            {b.t('upload.limit', { max: b.bytes(quota.maxFileBytes) })}
           </p>
         )}
       </div>

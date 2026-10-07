@@ -19,8 +19,9 @@ cd frontend && npm test && npm run typecheck # Vite doesn't type-check; tsc does
 ```
 
 ## Layout
-- `plugin.json` — id `stats`, platformApi **0.19.0** (exact major.minor at load; keep it equal to the
-  `plugin-api`/`plugin-testkit`/`@mosaicast/plugin-sdk` pins, CI and `manifest.test.ts` compare them).
+- `plugin.json` — id `stats`, platformApi **0.19.1** (the host matches major.minor at load; keep the whole
+  string equal to the `plugin-api`/`plugin-testkit`/`@mosaicast/plugin-sdk` pins, CI and `manifest.test.ts`
+  compare them).
 - `backend/…/stats/` — `StatsPlugin` (schedule, routes, OG), `read/` (`StatsReader` SPI, `Archive` with zip
   limits, `ReaderRegistry`, `StatsUnit` = podcast or book), `mat/` (MAT format 2: `MatAnalysis` podcast,
   `MatBook` book), `model/` (`EpisodeStats`, `BookStats`), `ingest/` (`Ingestor` reads uploads, works the

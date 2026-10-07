@@ -118,13 +118,15 @@ export async function uploadArchive(
   file: File,
   maxBytes: number | null,
   reader: string,
+  /** Formats the size limit for the "too big" message (`i18n.bytes`). */
+  bytes: (n: number) => string,
   onPause?: (seconds: number) => void,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<UploadState> {
   if (!ctx.blobs) return { state: 'failed', reason: 'upload.noStorage' };
   if (!/\.zip$/i.test(file.name)) return { state: 'failed', reason: 'upload.notZip' };
   if (maxBytes != null && file.size > maxBytes) {
-    return { state: 'failed', reason: 'upload.tooBig', params: { max: Math.floor(maxBytes / 1048576) } };
+    return { state: 'failed', reason: 'upload.tooBig', params: { max: bytes(maxBytes) } };
   }
   const head = new Uint8Array(await file.slice(0, 2).arrayBuffer());
   if (head[0] !== 0x50 || head[1] !== 0x4b) return { state: 'failed', reason: 'upload.notZip' };
