@@ -14,7 +14,7 @@ export default defineConfig({
     outDir: 'build',
     emptyOutDir: true,
     lib: {
-      entry: resolve(__dirname, 'src/stats-element.tsx'),
+      entry: resolve(import.meta.dirname, 'src/stats-element.tsx'),
       formats: ['es'],
       fileName: () => 'stats.es.js',
     },
