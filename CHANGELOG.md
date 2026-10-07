@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.1 (2026-10-07)
+
+Dependency updates, no change in behaviour.
+
+- React 19, Vite 8, `@vitejs/plugin-react` 6 and Vitest 5 in the frontend. The bundle is about 100 kB larger
+  (124 kB gzipped), mostly React 19.
+- pf4j 3.16.0, matching core 0.8.0; Gradle 9.8.0; `actions/setup-java` 6.0.1.
+
+## 0.1.0 (2026-10-06)
 
 First version.
 
