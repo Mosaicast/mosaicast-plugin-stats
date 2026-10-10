@@ -24,6 +24,8 @@ export interface RecordSpec {
   id: string;
   label: string;
   rows: RankRow[];
+  /** The ranking's column head over `what`; "Chapter" when left out. */
+  whatLabel?: string;
 }
 
 /**
@@ -108,7 +110,7 @@ function RankingDialog({ spec, onClose, b }: { spec: RecordSpec | null; onClose:
               <thead>
                 <tr>
                   <th scope="col">#</th>
-                  {(people || spec.rows.some((r) => r.what)) && <th scope="col" style={{ textAlign: 'left' }}>{people ? b.t('records.who') : b.t('book.chapter')}</th>}
+                  {(people || spec.rows.some((r) => r.what)) && <th scope="col" style={{ textAlign: 'left' }}>{people ? b.t('records.who') : spec.whatLabel ?? b.t('book.chapter')}</th>}
                   {where && <th scope="col" style={{ textAlign: 'left' }}>{b.t('book.episode')}</th>}
                   <th scope="col">{b.t('records.value')}</th>
                   {extra && <th scope="col" />}

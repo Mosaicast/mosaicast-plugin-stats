@@ -141,6 +141,11 @@ th button.sort:focus-visible { outline: 2px solid var(--mc-accent-text); outline
 th button.sort .arrow { font-size: 0.7rem; opacity: .55; }
 th[aria-sort] button.sort .arrow { opacity: 1; }
 table.pace td, table.pace th { vertical-align: top; }
+table.groups tr.active > * { background: color-mix(in srgb, var(--mc-accent) 10%, var(--mc-surface)); }
+table.groups button.link { text-align: left; }
+table.groups button.link[aria-pressed='true'] { font-weight: 600; }
+.group-pick { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 12px; }
+.group-pick label { display: inline-flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 0.9rem; }
 .delta { display: inline-block; padding: 0 6px; border-radius: 999px; color: var(--mc-text); white-space: nowrap; }
 .delta-less-1 { background: color-mix(in srgb, #2a78d6 14%, transparent); }
 .delta-less-2 { background: color-mix(in srgb, #2a78d6 26%, transparent); }

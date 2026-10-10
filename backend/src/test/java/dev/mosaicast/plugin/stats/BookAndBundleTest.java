@@ -16,6 +16,7 @@ import dev.mosaicast.plugin.stats.ingest.Docs;
 import dev.mosaicast.plugin.stats.ingest.Docs.ImportRecord;
 import dev.mosaicast.plugin.stats.ingest.Docs.StatsIndex;
 import dev.mosaicast.plugin.stats.ingest.Json;
+import dev.mosaicast.plugin.stats.model.BookStats;
 import dev.mosaicast.plugin.testkit.FakeFeedAccess;
 import dev.mosaicast.plugin.testkit.FakePluginContext;
 import dev.mosaicast.plugin.testkit.InMemoryDocStore;
@@ -233,7 +234,8 @@ class BookAndBundleTest {
         restarted.runScheduled();
 
         assertFalse(store.get(Scope.site(), Docs.CMD + "upgrade-" + ref, JsonNode.class).isPresent());
-        assertEquals(2, store.get(Scope.site(), Docs.STAGED + ref, JsonNode.class).orElseThrow().path("model").asInt());
+        assertEquals(BookStats.MODEL, store.get(Scope.site(), Docs.STAGED + ref, JsonNode.class).orElseThrow()
+                .path("model").asInt());
         assertEquals(1, record(ref).assignments().size(), "the re-read keeps where the book is shown");
         assertTrue(store.get(Scope.episode("s2e1"), "stats:book", JsonNode.class).orElseThrow()
                 .path("chapters").path(0).has("dialogue"));

@@ -17,6 +17,9 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
@@ -50,6 +53,11 @@ class LocalResultsTest {
                                 "    %-12s %6d words %5s sentences  top %s  new %s%n", c.heading(), c.words(),
                                 c.sentences(), c.characters().stream().limit(3).map(e -> e.text()).toList(),
                                 c.newCharacters().stream().limit(3).map(e -> e.text()).toList()));
+                        Map<String, Long> groups = new TreeMap<>(b.chapters().stream()
+                                .filter(c -> c.group() != null)
+                                .collect(Collectors.groupingBy(BookStats.Chapter::group, Collectors.counting())));
+                        System.out.printf("    chapter groups %s, %d chapters in none%n", groups,
+                                b.chapters().stream().filter(c -> c.group() == null).count());
                         continue;
                     }
                     EpisodeStats s = unit.stats();

@@ -130,6 +130,11 @@ export function bookOf(s: BookSummary): string {
 export interface ChapterPoint extends ChapterNumbers {
   /** `<book>/<chapter id>`, unique across books. */
   key: string;
+  /**
+   * The chapter group it belongs to in this scope (see `resolveGroups`), as shown: "Jaime" for "Jaime I". Null
+   * for chapters of no group, like a prologue.
+   */
+  group: string | null;
   book: string;
   title: string;
   /** Position in the book, from 0. */
@@ -173,10 +178,100 @@ export function chapterPoints(books: Record<string, BookSummary>, slugs: string[
         slug,
         avgSentence: c.sentences ? c.words / c.sentences : null,
         dialogueShare: c.sentences && c.dialogue != null ? c.dialogue / c.sentences : null,
+        group: c.group ?? null,
       });
     }
   }
-  return order.flatMap((book) => byBook.get(book)!.sort((x, y) => x.index - y.index));
+  return resolveGroups(order.flatMap((book) => byBook.get(book)!.sort((x, y) => x.index - y.index)));
+}
+
+/** How chapter groups compare: "Jaime", " jaime " and "JAIME" are one group. */
+export function groupKey(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
+/**
+ * Puts chapters into groups across every book of the scope. A group is a heading some book has more than once
+ * (the backend's `group`, "Jaime" for "Jaime I", "Jaime II", …), spelled as it first comes. A chapter that is a
+ * book's only one by that name ("Arya", no numeral) joins the group when another book of the scope makes it
+ * one; a prologue every book has once never becomes a group.
+ */
+export function resolveGroups(points: ChapterPoint[]): ChapterPoint[] {
+  const names = new Map<string, string>();
+  for (const p of points) if (p.group && !names.has(groupKey(p.group))) names.set(groupKey(p.group), p.group.trim());
+  return points.map((p) => ({ ...p, group: names.get(groupKey(p.group ?? p.heading)) ?? null }));
+}
+
+/** A chapter group as a row: its chapters' numbers and the podcast time spent on them. */
+export interface ChapterGroupRow extends GroupRow {
+  /** Its chapters, in scope order. */
+  points: ChapterPoint[];
+  /** Books it has chapters in. */
+  books: number;
+  /** Words per chapter. */
+  avgWords: number;
+}
+
+/** The chapter groups of a scope with at least two chapters in it, biggest first. */
+export function chapterGroups(points: ChapterPoint[], books: Record<string, BookSummary>, podcasts: Record<string, EpisodeStats>): ChapterGroupRow[] {
+  const byKey = new Map<string, ChapterPoint[]>();
+  for (const p of points) if (p.group) byKey.set(groupKey(p.group), [...(byKey.get(groupKey(p.group)) ?? []), p]);
+  return [...byKey.entries()]
+    .filter(([, mine]) => mine.length > 1)
+    .map(([id, mine]) => {
+      const totals = sentenceTotals(mine);
+      return {
+        id,
+        title: mine[0].group!,
+        ...totals,
+        minutesPerKWords: pace(mine, books, podcasts),
+        points: mine,
+        books: new Set(mine.map((p) => p.book)).size,
+        avgWords: totals.words / mine.length,
+      };
+    })
+    .sort((x, y) => y.chapters - x.chapters || x.title.localeCompare(y.title));
+}
+
+export type GroupRecordId = 'mostChapters' | 'longestAvg' | 'wordiest' | 'mostDialogue' | 'leastDialogue' | 'mostPace' | 'leastPace';
+
+/** Records between chapter groups, each with its full ranking (holder first). */
+export function groupRankings(rows: ChapterGroupRow[]): { id: GroupRecordId; entries: { row: ChapterGroupRow; value: number }[] }[] {
+  const rank = (id: GroupRecordId, value: (r: ChapterGroupRow) => number | null, lowFirst = false) => ({
+    id,
+    entries: rows
+      .map((row) => ({ row, value: value(row) }))
+      .filter((e): e is { row: ChapterGroupRow; value: number } => e.value != null && Number.isFinite(e.value))
+      .sort((a, b) => (lowFirst ? a.value - b.value : b.value - a.value)),
+  });
+  return [
+    rank('mostChapters', (r) => r.chapters),
+    rank('longestAvg', (r) => r.avgWords),
+    rank('wordiest', (r) => r.avgSentence),
+    rank('mostDialogue', (r) => r.dialogueShare),
+    rank('leastDialogue', (r) => r.dialogueShare, true),
+    rank('mostPace', (r) => r.minutesPerKWords),
+    rank('leastPace', (r) => r.minutesPerKWords, true),
+  ].filter((r) => r.entries.length > 1);
+}
+
+/** Where a chapter stands in its group: the how-manyth it is and how long against the group's average. */
+export interface GroupPlace {
+  group: string;
+  /** From 1, in scope order. */
+  n: number;
+  count: number;
+  /** This chapter's words against the group's words per chapter: +0.12 is 12 % longer. */
+  vsAverage: number | null;
+}
+
+/** Each grouped chapter's place in its group, by chapter key. */
+export function groupPlaces(points: ChapterPoint[]): Map<string, GroupPlace> {
+  const out = new Map<string, GroupPlace>();
+  for (const g of chapterGroups(points, {}, {})) {
+    g.points.forEach((p, i) => out.set(p.key, { group: g.title, n: i + 1, count: g.points.length, vsAverage: versus(p.words, g.avgWords) }));
+  }
+  return out;
 }
 
 /** Sentence numbers over a set of chapters; null where some chapter doesn't know them. */

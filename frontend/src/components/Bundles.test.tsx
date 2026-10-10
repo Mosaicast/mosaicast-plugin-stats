@@ -115,6 +115,37 @@ describe('books on the episode page', () => {
   });
 });
 
+describe('chapter groups on the episode page', () => {
+  beforeEach(() => forgetShared());
+
+  it('says where the chapter stands among its group', async () => {
+    const jaime = (index: number, heading: string, words: number) =>
+      bookSummary([{ id: `c${index}`, index, heading, group: 'Jaime', words, sentences: 300 }]);
+    const d = makeMockDocs({
+      'data/site/main/bundles': bundles,
+      'data/site/main/index': index({}, {
+        books: {
+          ep0: { book: jaime(1, 'Jaime I', 6000) },
+          ep: { book: jaime(3, 'Jaime II', 4000) },
+          ep2: { book: jaime(5, 'Jaime III', 5000) },
+          ep3: { book: bookSummary([{ id: 'c0', index: 0, heading: 'Prolog', words: 9000 }]) },
+        },
+      }),
+      'data/episode/ep/stats:book': {
+        model: 3, title: 'Book', warnings: [],
+        chapters: [{ id: 'c3', index: 3, heading: 'Jaime II', group: 'Jaime', words: 4000, sentences: 300, paragraphs: 80, characters: [], newCharacters: [] }],
+      } satisfies BookStats,
+    });
+    const view = await mount(<EpisodeView ctx={episodeCtx(d)} />);
+    await flush();
+    await flush();
+    const text = view.text();
+    expect(text).toContain('Jaime chapters');
+    expect(text).toContain('2 of 3 so far');
+    expect(text).toContain('20% shorter than the average Jaime chapter');
+  });
+});
+
 describe('books on the manage page', () => {
   beforeEach(() => forgetShared());
 

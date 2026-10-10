@@ -93,6 +93,13 @@ episode puts all chapters on that episode, and visitors get a chapter picker the
 - chapter by chapter, as a list (top 3 or 5 characters, places, groups and first appearances per chapter) or
   as a heat map (the most mentioned names against the chapters, each row on its own scale);
 - books and seasons side by side;
+- chapter groups, where the book repeats a heading ("Jaime I", "Jaime II", … → "Jaime"): a sortable table
+  (chapters, words, words per chapter, words per sentence, dialogue, podcast minutes per 1,000 words, top 3 or 5
+  characters), group records, and a picker that narrows the whole page down to one group's chapters. Groups
+  span the books in view: a book's only "Arya" chapter joins the "Arya" group of the next book, a prologue
+  every book has once never becomes one. On the episode page a grouped chapter says where it stands ("Jaime
+  chapters: 3 of 12 so far, 12% shorter than the average Jaime chapter"). Books without repeated headings
+  look as before;
 - podcast against book, episode by episode: minutes per 1,000 words of book (tinted blue to orange by how
   far below or above average it is), seconds per sentence, words spoken per word of book, laughs, and the
   1, 3 or 5 names the episode talked about most. Every number column sorts.

@@ -7,12 +7,14 @@ import {
   aggregateBooks,
   bookOf,
   byBook,
+  chapterGroups,
   chapterPoints,
   chapterRankings,
   mergeEntities,
   mergeNames,
   pace,
   sentenceTotals,
+  type ChapterGroupRow,
   type ChapterPoint,
   type ChapterRecordId,
   type GroupRow,
@@ -24,6 +26,7 @@ import type { BookSummary, Chapter, EpisodeStats, StatsIndex } from '../types';
 import { PaceTable } from './BookViews';
 import { RecordGroups, type RecordSpec } from './Records';
 import { ChapterCharts } from './ChapterCharts';
+import { ChapterGroupTable, groupRecords } from './ChapterGroups';
 import { LoadingBar, Tiles, tipBeside, titleOf, TopNames, useWidth, type Basics } from './common';
 
 type Entry = { text: string; count: number };
@@ -43,6 +46,9 @@ function group(c: Chapter, label: string): Entry[] {
  * The books side of a scope (the whole show, a season, or one book), laid out like the podcast stats: totals,
  * charts chapter by chapter, records, most mentioned names, and who and where shows up in which chapter.
  * Only chapters of released episodes are in the index, so nothing here is ahead of the show.
+ *
+ * Where chapters share a heading ("Jaime I", "Jaime II", …) they also add up per chapter group: a table and
+ * records compare the groups, and picking one narrows everything on the page down to its chapters.
  */
 export function BookOverview({
   ctx,
@@ -79,38 +85,67 @@ export function BookOverview({
     () => (only ? Object.fromEntries(Object.entries(books).filter(([, s]) => bookOf(s) === only)) : books),
     [books, only],
   );
-  const points = useMemo(() => chapterPoints(scoped, slugs), [scoped, slugs]);
+  const all = useMemo(() => chapterPoints(scoped, slugs), [scoped, slugs]);
+  const groups = useMemo(() => chapterGroups(all, scoped, podcasts), [all, scoped, podcasts]);
+  // Kept while switching scopes, as long as the new one has that group too.
+  const [picked, setPicked] = useState<string | null>(null);
+  const group = groups.find((g) => g.id === picked) ?? null;
+  const points = group ? group.points : all;
+  const keys = useMemo(() => (group ? new Set(group.points.map((p) => p.key)) : null), [group]);
+  // With a group picked, the episodes that are only about its chapters.
+  const episodes = useMemo(() => (keys ? slugs.filter((slug) => {
+    const s = scoped[slug];
+    return !!s && s.chapters.length > 0 && s.chapters.every((c) => keys.has(`${bookOf(s)}/${c.id}`));
+  }) : slugs), [keys, slugs, scoped]);
   const totals = useMemo(() => sentenceTotals(points), [points]);
-  const agg = useMemo(() => aggregateBooks(scoped, podcasts, slugs), [scoped, podcasts, slugs]);
-  const covering = useMemo(() => [...new Set(points.map((p) => p.slug))], [points]);
+  const agg = useMemo(() => aggregateBooks(scoped, podcasts, episodes), [scoped, podcasts, episodes]);
+  const covering = useMemo(() => [...new Set(all.map((p) => p.slug))], [all]);
   const details = useChapterDetails(ctx, index, selected, covering);
   const names = useMemo(() => {
+    if (group) {
+      // Episode summaries mix in other chapters; the group's own chapters have their names.
+      const chapters = group.points.map((p) => details?.get(p.key)).filter((c): c is Chapter => !!c);
+      return { PERSON: mergeNames(chapters.map((c) => c.characters)), ...mergeEntities(chapters.map((c) => c.entities)) };
+    }
     const summaries = Object.entries(scoped).filter(([slug]) => slugs.includes(slug)).map(([, s]) => s);
     const entities = mergeEntities(summaries.map((s) => s.entities));
     return { PERSON: mergeNames(summaries.map((s) => s.characters)), ...entities };
-  }, [scoped, slugs]);
+  }, [group, details, scoped, slugs]);
   const bookRows = useMemo(() => byBook(points, scoped, podcasts), [points, scoped, podcasts]);
   const seasonRows = useMemo(() => {
     if (!seasonOf) return [];
     return [...bySeason(slugs, seasonOf).entries()]
       .filter(([n]) => n !== null)
       .map(([n, list]): GroupRow | null => {
-        const mine = chapterPoints(scoped, list);
+        const mine = chapterPoints(scoped, list).filter((p) => !keys || keys.has(p.key));
         if (mine.length === 0) return null;
         return { id: String(n), title: b.t('seasons.label', { n: n! }), ...sentenceTotals(mine), minutesPerKWords: pace(mine, scoped, podcasts) };
       })
       .filter((r): r is GroupRow => r !== null)
       .sort((x, y) => Number(x.id) - Number(y.id));
-  }, [seasonOf, slugs, scoped, podcasts, b]);
+  }, [seasonOf, slugs, scoped, podcasts, b, keys]);
 
   if (points.length === 0) return <p className="muted">{b.t('books.empty')}</p>;
   const link = (p: ChapterPoint) => <a href={ctx.links.episode(p.slug)}>{titleOf(p.slug, labels)}</a>;
 
   return (
     <>
+      {groups.length > 0 && (
+        <div className="group-pick">
+          <label>
+            {b.t('groups.pick')}
+            <select value={group?.id ?? ''} onChange={(e) => setPicked(e.target.value || null)}>
+              <option value="">{b.t('book.allChapters')}</option>
+              {groups.map((g) => <option key={g.id} value={g.id}>{b.t('groups.option', { group: g.title, n: g.chapters })}</option>)}
+            </select>
+          </label>
+          {group && <button type="button" className="link small" onClick={() => setPicked(null)}>{b.t('groups.clear')}</button>}
+        </div>
+      )}
       <Tiles
         tiles={[
           { label: b.t('book.chapters'), value: fmt.count(totals.chapters, b.locale), sub: bookRows.length > 1 ? b.t('books.inBooks', { n: bookRows.length }) : undefined },
+          group && { label: b.t('groups.avgWords'), value: fmt.count(group.avgWords, b.locale) },
           { label: b.t('book.words'), value: fmt.compact(totals.words, b.locale) },
           totals.sentences != null && { label: b.t('book.sentences'), value: fmt.compact(totals.sentences, b.locale) },
           totals.avgSentence != null && { label: b.t('book.avgSentence'), value: fmt.decimal(totals.avgSentence, b.locale), sub: b.t('book.avgSentenceSub') },
@@ -128,7 +163,11 @@ export function BookOverview({
         </section>
       )}
 
-      {points.length > 1 && <Records points={points} link={(p) => ({ href: ctx.links.episode(p.slug), text: titleOf(p.slug, labels) })} b={b} />}
+      {points.length > 1 && (
+        <Records points={points} groups={group ? [] : groups} link={(p) => ({ href: ctx.links.episode(p.slug), text: titleOf(p.slug, labels) })} b={b} />
+      )}
+
+      {groups.length > 0 && <ChapterGroupTable rows={groups} details={details} active={group?.id ?? null} onPick={setPicked} b={b} />}
 
       {Object.values(names).some((l) => l.length > 0) && (
         <section className="section">
@@ -156,7 +195,12 @@ export function BookOverview({
   );
 }
 
-function Records({ points, link, b }: { points: ChapterPoint[]; link: (p: ChapterPoint) => { href: string; text: string }; b: Basics }) {
+function Records({ points, groups, link, b }: {
+  points: ChapterPoint[];
+  groups: ChapterGroupRow[];
+  link: (p: ChapterPoint) => { href: string; text: string };
+  b: Basics;
+}) {
   const rankings = useMemo(() => chapterRankings(points), [points]);
   const words = (v: number) => b.t('book.wordCount', { n: fmt.count(v, b.locale) });
   const value: Record<ChapterRecordId, (v: number) => string> = {
@@ -173,7 +217,12 @@ function Records({ points, link, b }: { points: ChapterPoint[]; link: (p: Chapte
     label: b.t(`books.${r.id}`),
     rows: r.entries.map((e) => ({ id: e.point.key, value: value[r.id](e.value), what: e.point.heading, link: link(e.point) })),
   }));
-  return <RecordGroups groups={[{ records: specs }]} b={b} />;
+  return (
+    <RecordGroups
+      groups={[{ title: b.t('book.chapters'), records: specs }, { title: b.t('groups.title'), records: groups.length > 1 ? groupRecords(groups, b) : [] }]}
+      b={b}
+    />
+  );
 }
 
 /**

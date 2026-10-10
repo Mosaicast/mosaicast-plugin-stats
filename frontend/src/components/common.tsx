@@ -323,3 +323,51 @@ export function titleOf(slug: string, labels?: Record<string, string>): string {
   const label = labels?.[slug];
   return label ? label.replace(/^(S\d+(?:E\d+)?|E\d+)\s·\s/, '') : slug;
 }
+
+/** Which column a table is sorted by, and which way. */
+export type SortState = { id: string; dir: 1 | -1 } | null;
+
+/** What a column sorts by: a number, text, or null for an empty cell. */
+export type SortKey<T> = (row: T, i: number) => number | string | null | undefined;
+
+/** The rows in the given order (`i` is a row's original place); empty cells go last either way. */
+export function sortRows<T>(rows: T[], key: SortKey<T> | undefined, dir: 1 | -1): T[] {
+  if (!key) return rows;
+  return rows
+    .map((r, i) => ({ r, k: key(r, i) }))
+    .sort((x, y) => {
+      if (x.k == null || y.k == null) return x.k == null ? (y.k == null ? 0 : 1) : -1;
+      return (typeof x.k === 'string' ? x.k.localeCompare(String(y.k)) : x.k - (y.k as number)) * dir;
+    })
+    .map((x) => x.r);
+}
+
+/** Clicking a column again turns it around; a new one starts with the biggest number, or with A for text. */
+export function nextSort(now: SortState, id: string, textFirst = false): SortState {
+  if (now?.id === id) return { id, dir: now.dir === 1 ? -1 : 1 };
+  return { id, dir: textFirst ? 1 : -1 };
+}
+
+/** A column header that sorts its table, with the arrow and `aria-sort` saying how. */
+export function SortTh({ label, hint, wrap, left, sort, id, onSort }: {
+  label: ReactNode;
+  hint?: string;
+  wrap?: boolean;
+  left?: boolean;
+  sort: SortState;
+  id: string;
+  /** Left out for a column that doesn't sort. */
+  onSort?: () => void;
+}) {
+  const dir = sort?.id === id ? sort.dir : 0;
+  return (
+    <th scope="col" title={hint} className={wrap ? 'wrap' : undefined} style={left ? { textAlign: 'left' } : undefined}
+      aria-sort={dir === 1 ? 'ascending' : dir === -1 ? 'descending' : undefined}>
+      {onSort ? (
+        <button type="button" className="sort" onClick={onSort}>
+          {label}<span className="arrow" aria-hidden="true">{dir === 1 ? '▲' : dir === -1 ? '▼' : '↕'}</span>
+        </button>
+      ) : label}
+    </th>
+  );
+}
