@@ -141,4 +141,83 @@ describe('books view', () => {
     // No podcast stats at all: the books view is the page.
     expect(view.text()).toContain('Chapter by chapter');
   });
+
+  describe('chapter groups', () => {
+    const grouped = (c: Chapter, group: string | null): Chapter => ({ ...c, group });
+    // Book five: Prolog, Jaime I, Arya (its only one), Jaime II. Book six: Arya I, Arya II.
+    const b5 = [
+      grouped(chapter(0, 'Prolog', ['Chett'], ['Mauer']), null),
+      grouped(chapter(1, 'Jaime I', ['Jaime', 'Brienne'], ['Harrenhal']), 'Jaime'),
+      grouped(chapter(2, 'Arya', ['Arya'], ['Trident']), null),
+      grouped(chapter(3, 'Jaime II', ['Jaime', 'Cersei'], ['Königsmund']), 'Jaime'),
+    ];
+    const b6 = [grouped(chapter(0, 'Arya I', ['Arya', 'Sandor'], ['Trident']), 'Arya'), grouped(chapter(1, 'Arya II', ['Arya'], ['Braavos']), 'Arya')];
+    const all = [...b5.map((c) => ['b5', c] as const), ...b6.map((c) => ['b6', c] as const)];
+    const slugs = all.map((_, i) => `g${i}`);
+
+    function groupedCtx(path: string) {
+      const docs = makeMockDocs({
+        'data/site/main/index': index({}, { books: Object.fromEntries(all.map(([book, c], i) => [slugs[i], { book: summary(book, [c]) }])) }),
+        ...Object.fromEntries(all.map(([, c], i) => [`data/episode/${slugs[i]}/stats:book`, published([c])])),
+      });
+      return makeMockCtx({
+        route: { path },
+        episodes: [...slugs].reverse(),
+        episodeLabels: Object.fromEntries(all.map(([, c], i) => [slugs[i], c.heading])),
+        docs,
+      });
+    }
+    const groupRows = (host: HTMLElement) => [...host.querySelectorAll('table.groups tbody tr')].map((r) => r.querySelector('th')?.textContent);
+
+    it('adds chapters up per group across books, prologues left out', async () => {
+      const view = await mount(<StatsPage ctx={groupedCtx('books')} />);
+      await flush();
+      await flush();
+      expect(view.text()).toContain('Chapter groups');
+      expect(groupRows(view.host)).toEqual(['Arya', 'Jaime']); // Arya: b5's single chapter plus b6's two
+      const arya = view.host.querySelector('table.groups tbody tr')!.textContent;
+      expect(arya).toContain('3');
+      expect(arya).toContain('Sandor');
+      const names = () => view.host.querySelectorAll('table.groups tbody tr:first-child ol.names-list li').length;
+      expect(names()).toBe(2); // Arya, Sandor: fewer than 3 known
+      const top5 = [...view.host.querySelectorAll('button.chip')].find((x) => x.textContent === 'Top 5' && x.closest('section')?.querySelector('table.groups')) as HTMLButtonElement;
+      await act(async () => top5.click());
+      expect(top5.getAttribute('aria-pressed')).toBe('true');
+      expect(view.text()).toContain('Most chapters');
+      const options = [...view.host.querySelectorAll('.group-pick option')].map((o) => o.textContent);
+      expect(options).toEqual(['All chapters', 'Arya (3)', 'Jaime (2)']);
+    });
+
+    it('narrows the page down to one group', async () => {
+      const view = await mount(<StatsPage ctx={groupedCtx('books')} />);
+      await flush();
+      await flush();
+      const jaime = [...view.host.querySelectorAll('table.groups button.link')].find((x) => x.textContent === 'Jaime') as HTMLButtonElement;
+      await act(async () => jaime.click());
+      const rows = [...view.host.querySelectorAll('table.by-chapter tbody tr th div:first-child')].map((d) => d.textContent);
+      expect(rows).toEqual(['Jaime I', 'Jaime II']);
+      expect((view.host.querySelector('.group-pick select') as HTMLSelectElement).value).toBe('jaime');
+      expect(view.text()).toContain('Words per chapter');
+      expect(view.text()).toContain('Cersei'); // names from the group's own chapters
+      expect(view.text()).not.toContain('Chett');
+      const clear = [...view.host.querySelectorAll('.group-pick button')].find((x) => x.textContent === 'Show all chapters') as HTMLButtonElement;
+      await act(async () => clear.click());
+      expect(view.host.querySelectorAll('table.by-chapter tbody tr')).toHaveLength(6);
+    });
+
+    it('keeps one book to its own groups', async () => {
+      const view = await mount(<StatsPage ctx={groupedCtx('books/b5')} />);
+      await flush();
+      await flush();
+      expect(groupRows(view.host)).toEqual(['Jaime']); // b5's lone Arya chapter is no group on its own
+    });
+
+    it('shows nothing new for a book without groups', async () => {
+      const { ctx } = ctxAt('books');
+      const view = await mount(<StatsPage ctx={ctx} />);
+      await flush();
+      expect(view.host.querySelector('.group-pick')).toBeNull();
+      expect(view.text()).not.toContain('Chapter groups');
+    });
+  });
 });

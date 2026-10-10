@@ -28,10 +28,10 @@ public record BookStats(int model, Source source, String title, String language,
                         List<Warning> warnings) {
 
     /**
-     * Version of the book shape. 2 added sentence numbers and places/groups per chapter; a book read with
-     * an older model is read again from its archive at start-up.
+     * Version of the book shape. 2 added sentence numbers and places/groups per chapter, 3 the chapter group;
+     * a book read with an older model is read again from its archive at start-up.
      */
-    public static final int MODEL = 2;
+    public static final int MODEL = 3;
 
     /** Names kept per chapter, and per summary. */
     public static final int TOP = 15;
@@ -47,6 +47,8 @@ public record BookStats(int model, Source source, String title, String language,
      * @param id              stable within this book ({@code c0}, {@code c1}, …)
      * @param index           position in the book, from 0
      * @param heading         the chapter heading, e.g. "Jaime I"
+     * @param group           the heading this chapter shares with others of the book, e.g. "Jaime" for "Jaime
+     *                        I"; null when no other chapter has it, or every chapter does
      * @param words           words in the chapter
      * @param sentences       sentences, if the source split them
      * @param paragraphs      paragraphs
@@ -57,8 +59,8 @@ public record BookStats(int model, Source source, String title, String language,
      * @param newCharacters   characters mentioned here for the first time in the book
      * @param entities        most mentioned places, groups, … (not people, not dates) by label
      */
-    public record Chapter(String id, int index, String heading, int words, Integer sentences, int paragraphs,
-                          Integer longestSentence, Integer dialogue, Integer questions,
+    public record Chapter(String id, int index, String heading, String group, int words, Integer sentences,
+                          int paragraphs, Integer longestSentence, Integer dialogue, Integer questions,
                           List<EntityCount> characters, List<EntityCount> newCharacters, List<EntityGroup> entities) {
 
         public Chapter {
@@ -112,8 +114,8 @@ public record BookStats(int model, Source source, String title, String language,
             c.newCharacters().forEach(e -> newcomers.merge(e.text(), e.count(), Integer::sum));
             c.entities().forEach(g -> g.top().forEach(e -> entities
                     .computeIfAbsent(g.label(), k -> new LinkedHashMap<>()).merge(e.text(), e.count(), Integer::sum)));
-            numbers.add(new ChapterNumbers(c.id(), c.index(), c.heading(), c.words(), c.sentences(), c.paragraphs(),
-                    c.longestSentence(), c.dialogue(), c.questions()));
+            numbers.add(new ChapterNumbers(c.id(), c.index(), c.heading(), c.group(), c.words(), c.sentences(),
+                    c.paragraphs(), c.longestSentence(), c.dialogue(), c.questions()));
         }
         List<EntityGroup> groups = new ArrayList<>();
         entities.forEach((label, counts) -> groups.add(new EntityGroup(label, top(counts))));
@@ -183,6 +185,7 @@ public record BookStats(int model, Source source, String title, String language,
      * @param id              chapter id
      * @param index           position in the book
      * @param heading         chapter heading
+     * @param group           the heading it shares with other chapters of the book, if any (see {@link Chapter})
      * @param words           words
      * @param sentences       sentences, if known
      * @param paragraphs      paragraphs
@@ -190,8 +193,8 @@ public record BookStats(int model, Source source, String title, String language,
      * @param dialogue        sentences with direct speech, if known
      * @param questions       questions, if known
      */
-    public record ChapterNumbers(String id, int index, String heading, int words, Integer sentences, int paragraphs,
-                                 Integer longestSentence, Integer dialogue, Integer questions) {
+    public record ChapterNumbers(String id, int index, String heading, String group, int words, Integer sentences,
+                                 int paragraphs, Integer longestSentence, Integer dialogue, Integer questions) {
     }
 
     /**

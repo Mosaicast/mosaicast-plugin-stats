@@ -4,7 +4,7 @@
 import type { PluginContext } from '@mosaicast/plugin-sdk';
 import { useEffect, useMemo, useState } from 'react';
 import { LAUGHTER } from '../aggregate';
-import { aggregateBooks } from '../book';
+import { aggregateBooks, chapterPoints, groupPlaces } from '../book';
 import { combine } from '../combine';
 import { canManage, loadEpisodeStats } from '../data';
 import { useSeasons } from '../seasons';
@@ -54,6 +54,12 @@ export function EpisodeView({ ctx }: { ctx: PluginContext }) {
     const agg = aggregateBooks(sel.books, sel.podcasts, mates);
     return { minutesPerKWords: agg.minutesPerKWords, secondsPerSentence: agg.secondsPerSentence, n };
   }, [seasonOf, bookSlugs, slug, sel.books, sel.podcasts]);
+  // Where this episode's chapters stand in their chapter groups, over everything released. Newest season
+  // first, as the host lists episodes, so the books come in the order the show reaches them.
+  const places = useMemo(() => {
+    const order = [...bookSlugs].sort((x, y) => (seasonOf(y) ?? -1) - (seasonOf(x) ?? -1));
+    return groupPlaces(chapterPoints(sel.books, order));
+  }, [bookSlugs, seasonOf, sel.books]);
 
   if (index === undefined || (docs === undefined && hasStats(index, slug))) {
     return (
@@ -138,7 +144,7 @@ export function EpisodeView({ ctx }: { ctx: PluginContext }) {
         {bookBundles.map((x) => (
           <div className="section" key={x.id}>
             <h3>{bookBundles.length > 1 ? b.bundleName(x) : b.t('book.title')}</h3>
-            <BookEpisode book={docs![x.id] as BookStats} seconds={stats?.durationSeconds ?? null} season={season} b={b} />
+            <BookEpisode book={docs![x.id] as BookStats} seconds={stats?.durationSeconds ?? null} season={season} places={places} b={b} />
           </div>
         ))}
         {podcastDocs[0] && <p className="tiny muted section">{sourceLine(podcastDocs[0], b)}</p>}

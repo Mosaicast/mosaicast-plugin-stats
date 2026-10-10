@@ -3,10 +3,10 @@
 
 import type { PluginContext } from '@mosaicast/plugin-sdk';
 import { useMemo, useState } from 'react';
-import { mergeEntities, versus, type BookAggregate } from '../book';
+import { bookSlug, mergeEntities, versus, type BookAggregate, type GroupPlace } from '../book';
 import * as fmt from '../format';
 import type { BookStats } from '../types';
-import { Tiles, titleOf, type Basics } from './common';
+import { nextSort, sortRows, SortTh, Tiles, titleOf, type Basics, type SortState } from './common';
 
 function Names({ title, list, b }: { title: string; list: { text: string; count: number }[]; b: Basics }) {
   if (list.length === 0) return null;
@@ -47,7 +47,7 @@ interface Column {
  */
 export function PaceTable({ ctx, agg, b }: { ctx: PluginContext; agg: BookAggregate; b: Basics }) {
   const labels = ctx.episodeLabels;
-  const [sort, setSort] = useState<{ id: string; dir: 1 | -1 } | null>(null);
+  const [sort, setSort] = useState<SortState>(null);
   const [names, setNames] = useState(1);
   // Book order (oldest episode first), and only episodes with podcast stats: the rest have no time to show.
   const rows = agg.rows.filter((r) => r.seconds != null).reverse();
@@ -112,22 +112,10 @@ export function PaceTable({ ctx, agg, b }: { ctx: PluginContext; agg: BookAggreg
     });
   }
 
-  const order = rows.map((r, i) => ({ r, i }));
   const active = sort && columns.find((c) => c.id === sort.id);
-  if (sort && active?.sort) {
-    const key = active.sort;
-    order.sort((x, y) => {
-      const a = key(x.r, x.i);
-      const c = key(y.r, y.i);
-      if (a == null || c == null) return a == null ? (c == null ? 0 : 1) : -1; // empty cells last
-      return (typeof a === 'string' ? a.localeCompare(String(c)) : a - (c as number)) * sort.dir;
-    });
-  }
-  const toggle = (c: Column) => setSort((now) => {
-    if (now?.id === c.id) return { id: c.id, dir: now.dir === 1 ? -1 : 1 };
-    // Numbers start with the biggest, text and the episode order with the first.
-    return { id: c.id, dir: c.id === 'episode' || c.id === 'chapters' ? 1 : -1 };
-  });
+  const order = sort ? sortRows(rows, active?.sort, sort.dir) : rows;
+  // Numbers start with the biggest, text and the episode order with the first.
+  const toggle = (c: Column) => setSort((now) => nextSort(now, c.id, c.id === 'episode' || c.id === 'chapters'));
 
   return (
     <section className="section">
@@ -147,24 +135,14 @@ export function PaceTable({ ctx, agg, b }: { ctx: PluginContext; agg: BookAggreg
         <table className="pace">
           <thead>
             <tr>
-              {columns.map((c) => {
-                const dir = sort?.id === c.id ? sort.dir : 0;
-                return (
-                  <th key={c.id} scope="col" title={c.hint} className={c.wrap ? 'wrap' : undefined}
-                    style={c.left ? { textAlign: 'left' } : undefined}
-                    aria-sort={dir === 1 ? 'ascending' : dir === -1 ? 'descending' : undefined}>
-                    {c.sort ? (
-                      <button type="button" className="sort" onClick={() => toggle(c)}>
-                        {c.label}<span className="arrow" aria-hidden="true">{dir === 1 ? '▲' : dir === -1 ? '▼' : '↕'}</span>
-                      </button>
-                    ) : c.label}
-                  </th>
-                );
-              })}
+              {columns.map((c) => (
+                <SortTh key={c.id} id={c.id} label={c.label} hint={c.hint} wrap={c.wrap} left={c.left} sort={sort}
+                  onSort={c.sort && (() => toggle(c))} />
+              ))}
             </tr>
           </thead>
           <tbody>
-            {order.map(({ r }) => (
+            {order.map((r) => (
               <tr key={r.slug}>
                 {columns.map((c, i) => i === 0
                   ? <th key={c.id} scope="row" style={{ fontWeight: 400, fontSize: '0.9rem', textAlign: 'left' }}>{c.cell(r)}</th>
@@ -228,12 +206,14 @@ function average<T>(rows: T[], value: (r: T) => number | null, weight: (r: T) =>
 
 /**
  * The chapters an episode covers. With several chapters a picker narrows the numbers down; the pace (podcast
- * time per word) only makes sense for all of them together, since the recording isn't split by chapter.
+ * time per word) only makes sense for all of them together, since the recording isn't split by chapter. A
+ * chapter of a chapter group ("Jaime III") also says where it stands among the group's released chapters.
  */
 export function BookEpisode({
   book,
   seconds,
   season,
+  places,
   b,
 }: {
   book: BookStats;
@@ -241,6 +221,8 @@ export function BookEpisode({
   seconds: number | null;
   /** The season's pace, for the comparison. */
   season: { minutesPerKWords: number | null; secondsPerSentence: number | null; n: number | null };
+  /** Each grouped chapter's place in its group (`groupPlaces`), by `<book>/<chapter id>`. */
+  places?: Map<string, GroupPlace>;
   b: Basics;
 }) {
   const [only, setOnly] = useState<string | null>(null);
@@ -269,6 +251,8 @@ export function BookEpisode({
     };
   }, [chapters]);
   const whole = only === null;
+  const one = chapters.length === 1 ? chapters[0] : null;
+  const place = one ? places?.get(`${bookSlug(book.title)}/${one.id}`) : undefined;
   const perK = whole && seconds != null && sum.words > 0 ? seconds / 60 / (sum.words / 1000) : null;
   const perSentence = whole && seconds != null && sum.sentences ? seconds / sum.sentences : null;
   return (
@@ -288,6 +272,11 @@ export function BookEpisode({
       <Tiles
         tiles={[
           book.chapters.length === 1 && { label: b.t('book.chapter'), value: book.chapters[0].heading },
+          place && {
+            label: b.t('groups.tile', { group: place.group }),
+            value: b.t('groups.place', { n: place.n, count: place.count }),
+            sub: lengthText(place, b),
+          },
           { label: b.t('book.words'), value: fmt.count(sum.words, b.locale) },
           sum.sentences != null && { label: b.t('book.sentences'), value: fmt.count(sum.sentences, b.locale) },
           { label: b.t('book.paragraphs'), value: fmt.count(sum.paragraphs, b.locale) },
@@ -317,6 +306,13 @@ export function BookEpisode({
 function repeated(list: { text: string; count: number }[] = []) {
   const more = list.filter((e) => e.count > 1);
   return more.length >= 3 ? more : list;
+}
+
+function lengthText(place: GroupPlace, b: Basics): string | undefined {
+  if (place.vsAverage == null) return undefined;
+  if (Math.abs(place.vsAverage) < 0.03) return b.t('groups.even', { group: place.group });
+  const pct = fmt.percent(Math.abs(place.vsAverage), b.locale);
+  return b.t(place.vsAverage > 0 ? 'groups.longer' : 'groups.shorter', { pct, group: place.group });
 }
 
 function deltaText(value: number | null, season: number | null, b: Basics): string | undefined {

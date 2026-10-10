@@ -83,6 +83,8 @@ export interface Chapter {
   id: string;
   index: number;
   heading: string;
+  /** The heading it shares with other chapters of the book ("Jaime" for "Jaime I"); missing before book model 3. */
+  group?: string | null;
   words: number;
   sentences?: number | null;
   paragraphs: number;
@@ -129,6 +131,8 @@ export interface ChapterNumbers {
   id: string;
   index?: number | null;
   heading: string;
+  /** The heading it shares with other chapters of the book, if any. */
+  group?: string | null;
   words: number;
   sentences?: number | null;
   paragraphs: number;

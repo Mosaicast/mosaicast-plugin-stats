@@ -49,10 +49,15 @@ export function index(
 }
 
 /** A book summary covering the given chapters. */
-export function bookSummary(chapters: { heading: string; words: number; sentences?: number }[], characters: string[] = []): BookSummary {
+export function bookSummary(
+  chapters: { heading: string; words: number; sentences?: number; id?: string; index?: number; group?: string }[],
+  characters: string[] = [],
+): BookSummary {
   return {
     title: 'Book',
-    chapters: chapters.map((c, i) => ({ id: `c${i}`, heading: c.heading, words: c.words, sentences: c.sentences ?? null, paragraphs: 10 })),
+    chapters: chapters.map((c, i) => ({
+      id: c.id ?? `c${i}`, index: c.index, heading: c.heading, group: c.group, words: c.words, sentences: c.sentences ?? null, paragraphs: 10,
+    })),
     words: chapters.reduce((a, c) => a + c.words, 0),
     sentences: chapters.every((c) => c.sentences != null) ? chapters.reduce((a, c) => a + (c.sentences ?? 0), 0) : null,
     paragraphs: chapters.length * 10,

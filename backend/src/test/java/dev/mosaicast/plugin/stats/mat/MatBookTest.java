@@ -68,6 +68,47 @@ class MatBookTest {
         assertEquals("test", book.summary().book());
     }
 
+    /** A chapter as MAT writes it: just the headings and one paragraph. */
+    private static String chapter(String heading, String raw) {
+        return raw == null
+                ? "{\"heading\": \"%s\", \"paragraphs\": [\"x\"]}".formatted(heading)
+                : "{\"heading\": \"%s\", \"heading_raw\": \"%s\", \"paragraphs\": [\"x\"]}".formatted(heading, raw);
+    }
+
+    private static List<String> groups(String... chapters) {
+        BookStats book = read("{\"title\": \"Test\", \"chapters\": [" + String.join(",", chapters) + "]}");
+        return book.chapters().stream().map(c -> c.group() == null ? "-" : c.group()).toList();
+    }
+
+    @Test
+    void chaptersSharingAHeadingInTheBookAreAGroup() {
+        assertEquals(List.of("-", "Jaime", "Cersei", "Jaime", "-", "Cersei", "-"), groups(
+                chapter("Prolog", "Prolog"), chapter("Jaime I", "Jaime"), chapter("Cersei I", "Cersei"),
+                chapter("Jaime II", "Jaime"), chapter("Arya", "Arya"), chapter("Cersei II", " CERSEI "),
+                chapter("Epilog", "Epilog")));
+    }
+
+    @Test
+    void noGroupsWithoutRepeatedHeadings() {
+        // MAT's own example: Chapter 1, Chapter 2, Epilogue.
+        assertEquals(List.of("-", "-"), groups(chapter("Chapter 1", "Chapter 1"), chapter("Chapter 2", "Chapter 2")));
+        // A heading every chapter has would make the group the whole book.
+        assertEquals(List.of("-", "-", "-"), groups(chapter("Chapter I", "Chapter"), chapter("Chapter II", "Chapter"),
+                chapter("Chapter III", "Chapter")));
+        // No heading_raw, no group (the numbered heading alone doesn't tell).
+        assertEquals(List.of("-", "-", "-"), groups(chapter("Jaime I", null), chapter("Jaime II", null),
+                chapter("Prolog", null)));
+    }
+
+    @Test
+    void theGroupGoesIntoTheSummary() {
+        BookStats book = read("{\"title\": \"Test\", \"chapters\": [" + String.join(",",
+                chapter("Prolog", "Prolog"), chapter("Jaime I", "Jaime"), chapter("Jaime II", "Jaime")) + "]}");
+        assertEquals(List.of("Jaime"), book.only(List.of("c2")).summary().chapters().stream()
+                .map(BookStats.ChapterNumbers::group).toList());
+        assertNull(book.summary().chapters().getFirst().group());
+    }
+
     @Test
     void aSlugIsPlainAscii() {
         assertEquals("das-lied-von-eis-und-feuer-05", BookStats.slug("Das Lied von Eis und Feuer 05"));

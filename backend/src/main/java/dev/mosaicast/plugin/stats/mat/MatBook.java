@@ -24,6 +24,8 @@ import tools.jackson.databind.JsonNode;
  * Reads a MAT {@code book/result.json} (format 2) into {@link BookStats}. Text is only counted, never kept:
  * words and sentences per chapter, sentence lengths, direct speech and questions, the character list MAT
  * already built (names and mention counts per chapter heading) and the places and groups its sentences name.
+ * Chapters that share a heading in the book ({@code heading_raw} "Jaime" for "Jaime I", "Jaime II", …) get it
+ * as their group.
  */
 final class MatBook {
 
@@ -34,6 +36,9 @@ final class MatBook {
         JsonNode chapters = root.path("chapters");
         List<String> headings = new ArrayList<>();
         Map<String, Integer> indexOf = new HashMap<>();
+        List<String> raw = new ArrayList<>();
+        Map<String, Integer> rawCount = new HashMap<>();
+        Map<String, String> spelling = new HashMap<>();
         for (JsonNode c : chapters.values()) {
             String heading = MatPodcast.text(c.get("heading"));
             if (heading == null || heading.isBlank()) {
@@ -41,6 +46,13 @@ final class MatBook {
             }
             indexOf.putIfAbsent(heading, headings.size());
             headings.add(heading);
+            String r = MatPodcast.text(c.get("heading_raw"));
+            r = r == null ? "" : r.strip().replaceAll("\\s+", " ");
+            raw.add(r);
+            if (!r.isEmpty()) {
+                rawCount.merge(groupKey(r), 1, Integer::sum);
+                spelling.putIfAbsent(groupKey(r), r);
+            }
         }
 
         // Character mentions per chapter, and the chapter each character first shows up in.
@@ -97,8 +109,8 @@ final class MatBook {
             // First appearances by how big a part they play in the whole book, so main characters lead.
             List<EntityCount> fresh = topOf(newcomers, Comparator.comparingInt(
                     (Map.Entry<String, Integer> e) -> total.getOrDefault(e.getKey(), 0)).reversed());
-            out.add(new Chapter("c" + i, i, headings.get(i), words, s.count, paragraphs, s.longest, s.dialogue,
-                    s.questions, top, fresh, s.entities));
+            out.add(new Chapter("c" + i, i, headings.get(i), group(raw.get(i), rawCount, spelling, headings.size()), words,
+                    s.count, paragraphs, s.longest, s.dialogue, s.questions, top, fresh, s.entities));
             i++;
         }
         if (out.isEmpty()) {
@@ -107,6 +119,23 @@ final class MatBook {
         }
         return new BookStats(BookStats.MODEL, source, MatPodcast.text(root.get("title")),
                 MatPodcast.text(root.get("language")), out, warnings);
+    }
+
+    /**
+     * The group of a chapter: its heading as in the book (spelled as where it first comes), when other chapters
+     * share it. A heading every chapter shares ("Chapter" for "Chapter I" … "Chapter XL") groups nothing, so it
+     * gets none either.
+     */
+    private static String group(String raw, Map<String, Integer> counts, Map<String, String> spelling, int chapters) {
+        if (raw.isEmpty()) {
+            return null;
+        }
+        int n = counts.getOrDefault(groupKey(raw), 0);
+        return n >= 2 && n < chapters ? spelling.get(groupKey(raw)) : null;
+    }
+
+    private static String groupKey(String raw) {
+        return raw.toLowerCase(Locale.ROOT);
     }
 
     /** Labels left out of a chapter's names: people come from the character list, the rest is noise. */

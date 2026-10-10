@@ -3,7 +3,7 @@
 Source: [GameOfPods/MAT](https://github.com/GameOfPods/MAT). The authoritative spec is `result-format.md` in
 `mat-result-format-<version>.zip`, attached to every MAT release together with JSON Schemas. This file only
 says which parts the plugin reads and how it turns them into its own model. Written against **format 2.6.0**
-(MAT 0.3.1).
+(checked against the spec attached to MAT 0.3.3).
 
 > Format 1 (MAT 0.2.0 and older, `0.PodcastOutput/` folders with `media.json`, `diarization.json`, …) is gone.
 > MAT itself calls it unreadable. The reader recognises it and tells the uploader to re-run with MAT 0.3+.
@@ -74,7 +74,8 @@ Read only for counts and names; no paragraph, sentence, lemma or summary is stor
 |---|---|
 | `title` | `title` (the import's hint; `input.name` when missing) |
 | `chapters[].id` | `c0`, `c1`, … in table-of-contents order |
-| `chapters[].heading` | `heading` (MAT already makes repeated headings unique) |
+| `chapters[].heading` | `heading` (MAT already makes repeated headings unique: "Jaime I", "Jaime II") |
+| `chapters[].group` | `heading_raw` (whitespace collapsed) when at least two chapters of the book have it (case-insensitive) and not every chapter does; spelled as where it first comes; null otherwise |
 | `chapters[].words` | whitespace-separated tokens in `paragraphs` that contain a letter or digit |
 | `chapters[].sentences` | number of `sentences` (null when splitting didn't run) |
 | `chapters[].paragraphs` | non-empty `paragraphs` |
@@ -88,8 +89,16 @@ Read only for counts and names; no paragraph, sentence, lemma or summary is stor
 Sentence texts are only counted and never stored. Not read: `chapters[].summary` (AI-written),
 `sentences[].lemmas`, `characters[].variants`, `characters[].joined`.
 
-`BookStats.MODEL` is 2 since the sentence numbers and places/groups were added. Books staged with an older
-model are queued for a re-read from their archive when the plugin starts.
+`BookStats.MODEL` is 3 since the chapter group was added (2: sentence numbers and places/groups). Books
+staged with an older model are queued for a re-read from their archive when the plugin starts.
+
+### Chapter groups
+
+`group` is decided per book, over all its chapters, so "Jaime I" has it even while "Jaime II" isn't out. The
+frontend (`resolveGroups` in `book.ts`) then groups across the books in view: a group is a `group` value some
+book has, and a chapter joins it by its `group` or, when it is its book's only one by that name (heading
+"Arya", no numeral), by its heading. A heading every book has once (Prologue, Epilogue) never becomes a
+group, and a book without repeated headings has none.
 
 ## When `speakers` and the transcript disagree
 

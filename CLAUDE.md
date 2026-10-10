@@ -29,7 +29,7 @@ cd frontend && npm test && npm run typecheck # Vite doesn't type-check; tsc does
 - `frontend/src/` — one bundle, four elements (`stats-episode`, `stats-card`, `stats-overview`,
   `stats-page`; routes `''`, `season/:n`, `books`, `books/season/:n`, `books/:book`, `manage`, mirrored by
   `StatsPlugin.hasRoute`); `aggregate.ts`/`book.ts` sum any episode set (`chapterPoints` for the books
-  view), `useChapterDetails` loads per-chapter names with one `getMany`, `combine.ts` adds ticked podcast bundles,
+  view, `resolveGroups`/`chapterGroups` for chapter groups across the books in view), `useChapterDetails` loads per-chapter names with one `getMany`, `combine.ts` adds ticked podcast bundles,
   `viewChoice.ts` keeps the visitor's bundle/spoiler choice, `seasons.ts` looks seasons up from snapshots.
 - `docs/MAT-FORMAT.md` — how MAT results map to `EpisodeStats` (repo-owned, keep current).
 
