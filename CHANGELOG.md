@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-10)
 
 - Chapter groups for books: chapters sharing a heading in the book (MAT's `heading_raw`, "Jaime" for "Jaime I")
-  add up per group, across the books in view. The books page gets a group table, group records and a picker
-  that narrows everything to one group; a grouped chapter's episode says where it stands in its group.
-  Prologues and other one-per-book headings never form a group; books without repeated headings are unchanged.
+  add up per group, across the books in view. The books page gets a sortable group table (top 3 or 5
+  characters), group records and a picker that narrows everything to one group; a grouped chapter's episode
+  says where it stands in its group. Prologues and other one-per-book headings never form a group; books
+  without repeated headings are unchanged.
 - `BookStats.MODEL` 3: books read before are read again from their archives at start-up.
 
 ## 0.1.2 (2026-10-07)
