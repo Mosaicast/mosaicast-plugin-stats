@@ -16,7 +16,6 @@ import {
   sentenceTotals,
   type ChapterGroupRow,
   type ChapterPoint,
-  type ChapterRecordId,
   type GroupRow,
 } from '../book';
 import { useChapterDetails } from '../data';
@@ -24,9 +23,11 @@ import * as fmt from '../format';
 import { bySeason, type SeasonLookup } from '../seasons';
 import type { BookSummary, Chapter, EpisodeStats, StatsIndex } from '../types';
 import { PaceTable } from './BookViews';
+import { chapterValue } from './recordValues';
 import { RecordGroups, type RecordSpec } from './Records';
 import { ChapterCharts } from './ChapterCharts';
 import { ChapterGroupTable, groupRecords } from './ChapterGroups';
+import { ExportButton, ExportRow } from '../export/ExportContext';
 import { LoadingBar, Tiles, tipBeside, titleOf, TopNames, useWidth, type Basics } from './common';
 
 type Entry = { text: string; count: number };
@@ -142,6 +143,7 @@ export function BookOverview({
           {group && <button type="button" className="link small" onClick={() => setPicked(null)}>{b.t('groups.clear')}</button>}
         </div>
       )}
+      <ExportRow item="book.summary" />
       <Tiles
         tiles={[
           { label: b.t('book.chapters'), value: fmt.count(totals.chapters, b.locale), sub: bookRows.length > 1 ? b.t('books.inBooks', { n: bookRows.length }) : undefined },
@@ -159,7 +161,7 @@ export function BookOverview({
 
       {points.length > 1 && (
         <section className="section">
-          <ChapterCharts points={points} labels={labels} b={b} />
+          <ChapterCharts points={points} labels={labels} b={b} actions={<ExportButton item="book.chapters" />} />
         </section>
       )}
 
@@ -167,10 +169,11 @@ export function BookOverview({
         <Records points={points} groups={group ? [] : groups} link={(p) => ({ href: ctx.links.episode(p.slug), text: titleOf(p.slug, labels) })} b={b} />
       )}
 
-      {groups.length > 0 && <ChapterGroupTable rows={groups} details={details} active={group?.id ?? null} onPick={setPicked} b={b} />}
+      {groups.length > 0 && <ChapterGroupTable rows={groups} details={details} active={group?.id ?? null} onPick={setPicked} b={b} actions={<ExportButton item="book.groups" />} />}
 
       {Object.values(names).some((l) => l.length > 0) && (
         <section className="section">
+          <ExportButton item="book.names" />
           <h3>{b.t('names.title')}</h3>
           <TopNames groups={names} b={b} limit={15} />
         </section>
@@ -202,23 +205,14 @@ function Records({ points, groups, link, b }: {
   b: Basics;
 }) {
   const rankings = useMemo(() => chapterRankings(points), [points]);
-  const words = (v: number) => b.t('book.wordCount', { n: fmt.count(v, b.locale) });
-  const value: Record<ChapterRecordId, (v: number) => string> = {
-    longest: words,
-    shortest: words,
-    longestSentence: words,
-    wordiest: (v) => b.t('books.perSentence', { n: fmt.decimal(v, b.locale) }),
-    mostDialogue: (v) => fmt.percent(v, b.locale),
-    leastDialogue: (v) => fmt.percent(v, b.locale),
-    mostQuestions: (v) => fmt.count(v, b.locale),
-  };
   const specs: RecordSpec[] = rankings.map((r) => ({
     id: r.id,
     label: b.t(`books.${r.id}`),
-    rows: r.entries.map((e) => ({ id: e.point.key, value: value[r.id](e.value), what: e.point.heading, link: link(e.point) })),
+    rows: r.entries.map((e) => ({ id: e.point.key, value: chapterValue(r.id, e.value, b), what: e.point.heading, link: link(e.point) })),
   }));
   return (
     <RecordGroups
+      actions={<ExportButton item="book.records" />}
       groups={[{ title: b.t('book.chapters'), records: specs }, { title: b.t('groups.title'), records: groups.length > 1 ? groupRecords(groups, b) : [] }]}
       b={b}
     />

@@ -6,7 +6,7 @@ import { iconCss } from '@mosaicast/plugin-sdk';
 /** Host icons this plugin draws (published by core as --mc-icon-*). */
 export const ICONS = [
   'chart-bar', 'upload', 'warning', 'check', 'delete', 'refresh', 'arrow-right', 'arrow-left', 'people', 'clock',
-  'settings', 'info', 'book', 'close',
+  'settings', 'info', 'book', 'close', 'image', 'download', 'share-native', 'save', 'undo',
 ] as const;
 
 /**
@@ -209,4 +209,50 @@ select, input[type='text'] { font: inherit; font-size: 0.9rem; padding: 6px 8px;
 .card-line { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--mc-text-muted); min-width: 0; }
 .card-line .share { width: 56px; flex: none; }
 .card-line .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* image export */
+.export-btn { float: right; display: inline-flex; align-items: center; gap: 6px; margin: -2px 0 0 10px; padding: 3px 10px; min-height: 30px;
+  font: inherit; font-size: 0.8rem; border-radius: 999px; border: 1px solid var(--mc-border); background: var(--mc-surface);
+  color: var(--mc-text); cursor: pointer; }
+.export-btn:hover { border-color: var(--mc-accent-text); color: var(--mc-accent-text); }
+.export-row { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.export-row .export-btn { float: none; margin: 0; }
+.chart-head .export-btn, .head .export-btn { float: none; margin: 0 0 0 auto; }
+dialog.export { border: 1px solid var(--mc-border); border-radius: 14px; padding: 0; background: var(--mc-surface); color: var(--mc-text);
+  width: min(1240px, calc(100vw - 24px)); max-width: none; height: min(94vh, 1000px); max-height: none; overflow: hidden;
+  box-shadow: 0 16px 48px rgb(0 0 0 / .3); }
+dialog.export::backdrop { background: rgb(0 0 0 / .55); }
+.export-layout { display: grid; grid-template-columns: minmax(300px, 390px) minmax(0, 1fr); height: 100%; }
+.export-side { overflow-y: auto; padding: 16px 18px 20px; border-right: 1px solid var(--mc-border); min-height: 0; }
+.export-side fieldset { border: 0; padding: 0; margin: 0 0 18px; min-width: 0; }
+.export-side legend { font-weight: 600; font-size: 0.92rem; margin-bottom: 8px; padding: 0; }
+.export-side select, .export-side input[type='text'] { width: 100%; }
+.field { display: grid; gap: 4px; margin-bottom: 10px; font-size: 0.85rem; }
+.field > span { color: var(--mc-text-muted); }
+.field input[type='range'] { width: 100%; accent-color: var(--mc-accent); }
+.toggles { display: grid; gap: 2px; margin-bottom: 10px; }
+.toggles label { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 0.88rem; cursor: pointer; }
+.toggles input { width: 16px; height: 16px; margin: 0; accent-color: var(--mc-accent); }
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 10px; margin-top: 10px; }
+.swatch-field { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; min-height: 34px; }
+.swatch-field input[type='color'] { width: 38px; height: 30px; padding: 0 2px; border: 1px solid var(--mc-border); border-radius: 6px; background: var(--mc-bg); cursor: pointer; flex: none; }
+.export-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.export-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden;
+  background: color-mix(in srgb, var(--mc-text) 6%, var(--mc-bg)); }
+.export-canvas { flex: none; box-shadow: 0 6px 28px rgb(0 0 0 / .22); }
+.export-canvas svg { display: block; width: 100%; height: 100%; }
+.export-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; padding: 12px 16px;
+  border-top: 1px solid var(--mc-border); }
+.export-status { margin-right: auto; color: var(--mc-text-muted); }
+.export-status.bad { color: var(--mc-text); }
+label.btn { position: relative; }
+.logo-thumb { width: 44px; height: 44px; object-fit: contain; border: 1px solid var(--mc-border); border-radius: 8px; background: var(--mc-bg); }
+@media (max-width: 760px) {
+  dialog.export { width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; border: 0; }
+  .export-layout { grid-template-columns: 1fr; grid-template-rows: minmax(0, 46%) minmax(0, 54%); }
+  .export-main { order: -1; border-bottom: 1px solid var(--mc-border); }
+  .export-side { border-right: 0; }
+  .export-actions { padding: 8px 12px; }
+  .export-btn-text { display: none; }
+}
 `;

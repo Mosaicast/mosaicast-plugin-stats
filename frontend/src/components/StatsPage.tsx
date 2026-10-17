@@ -10,13 +10,14 @@ import { BookOverview } from './BookOverview';
 import { hasStats, Icon, LoadingBar, Root, useEpisodesReady, useSelection, useSiteData } from './common';
 import { Manage } from './Manage';
 import { ScopeStats } from './ScopeStats';
+import { ExportProvider, type ExportScope } from '../export/ExportContext';
 
 /**
  * Everything under /p/stats/: the show's podcast stats (all seasons or one), the books behind it (all, one
  * season, or one book), and the manage page.
  */
 export function StatsPage({ ctx }: { ctx: PluginContext }) {
-  const { index, failed, basics: b } = useSiteData(ctx);
+  const { index, failed, basics: b, settings, bundleSettings } = useSiteData(ctx);
   const ready = useEpisodesReady(ctx);
   const match = matchRoute(ctx.route.path, ['', 'season/:n', 'manage', 'books', 'books/season/:n', 'books/:book']);
   const seasonOf = useSeasons(ctx, ctx.episodes);
@@ -76,6 +77,9 @@ export function StatsPage({ ctx }: { ctx: PluginContext }) {
   );
 
   let body: React.ReactNode;
+  // What the export dialog draws from: the same episodes and page as what's shown.
+  let scope: ExportScope | null = null;
+  const path = `/p/stats${current ? `/${current}` : ''}`;
   const books = (slugs: string[], extra: { only?: string; seasonOf?: typeof seasonOf } = {}) => (
     <>
       {sel.picker}
@@ -100,13 +104,17 @@ export function StatsPage({ ctx }: { ctx: PluginContext }) {
       </p>
     );
   } else if (pattern === 'books/:book') {
+    scope = { area: 'book', slugs: ctx.episodes, only: match.params.book, path };
     body = books(ctx.episodes, { only: match.params.book, seasonOf });
   } else if (pattern === 'books/season/:n' || (booksMode && pattern === 'season/:n')) {
+    scope = { area: 'book', slugs: groups.get(Number(match.params.n)) ?? [], season: Number(match.params.n), path };
     body = books(groups.get(Number(match.params.n)) ?? []);
   } else if (booksMode) {
+    scope = { area: 'book', slugs: ctx.episodes, path };
     body = books(ctx.episodes, { seasonOf });
   } else if (pattern === 'season/:n') {
     const n = Number(match.params.n);
+    scope = { area: 'podcast', slugs: groups.get(n) ?? [], season: n, path };
     body = (
       <>
         {sel.picker}
@@ -115,6 +123,7 @@ export function StatsPage({ ctx }: { ctx: PluginContext }) {
       </>
     );
   } else {
+    scope = { area: 'podcast', slugs: ctx.episodes, seasonOf, path };
     body = (
       <>
         {sel.picker}
@@ -138,7 +147,13 @@ export function StatsPage({ ctx }: { ctx: PluginContext }) {
         <h1 style={{ fontSize: '1.6rem', margin: '0 0 6px' }}>{heading}</h1>
         {pattern !== 'manage' && <p className="muted small" style={{ margin: '0 0 16px' }}>{b.t(booksMode ? 'books.lead' : 'page.lead')}</p>}
         {tabs}
-        <section className="panel">{body}</section>
+        <section className="panel">
+          {scope ? (
+            <ExportProvider ctx={ctx} index={index} settings={settings} bundleSettings={bundleSettings} selected={sel.selected} scope={scope} b={b}>
+              {body}
+            </ExportProvider>
+          ) : body}
+        </section>
       </div>
     </Root>
   );

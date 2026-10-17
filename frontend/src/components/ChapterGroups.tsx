@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 The Mosaicast Authors
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { groupRankings, mergeNames, type ChapterGroupRow, type GroupRecordId } from '../book';
 import * as fmt from '../format';
 import type { Chapter } from '../types';
@@ -23,7 +23,7 @@ interface Column {
  * chapters, how long, how wordy, how much dialogue, how much podcast per word, whom they mention most. Every
  * column sorts; a group's name narrows the whole page down to its chapters. Top 3 or 5 characters per group.
  */
-export function ChapterGroupTable({ rows, details, active, onPick, b }: {
+export function ChapterGroupTable({ rows, details, active, onPick, b, actions }: {
   rows: ChapterGroupRow[];
   /** Per-chapter names, undefined while loading. */
   details: Map<string, Chapter> | undefined;
@@ -31,6 +31,8 @@ export function ChapterGroupTable({ rows, details, active, onPick, b }: {
   active: string | null;
   onPick: (id: string | null) => void;
   b: Basics;
+  /** Buttons next to the heading (export). */
+  actions?: ReactNode;
 }) {
   const [sort, setSort] = useState<SortState>(null);
   const [names, setNames] = useState(3);
@@ -87,6 +89,7 @@ export function ChapterGroupTable({ rows, details, active, onPick, b }: {
 
   return (
     <section className="section">
+      {actions}
       <div className="chart-head">
         <h3>{b.t('groups.title')}</h3>
         {columns.some((c) => c.id === 'names') && (

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 The Mosaicast Authors
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { EpisodePoint } from '../aggregate';
 import * as fmt from '../format';
 import { shortLabel, tipBeside, titleOf, useWidth, type Basics } from './common';
@@ -27,11 +27,14 @@ export function EpisodeCharts({
   people,
   labels,
   b,
+  actions,
 }: {
   points: EpisodePoint[];
   people: string[];
   labels?: Record<string, string>;
   b: Basics;
+  /** Buttons next to the first heading (export). */
+  actions?: ReactNode;
 }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [tip, setTip] = useState<TipState | null>(null);
@@ -108,6 +111,7 @@ export function EpisodeCharts({
 
   return (
     <div ref={ref}>
+      {actions}
       <h3>{b.t('chart.shares')}</h3>
       <div className="chart">
         <svg viewBox={`0 0 ${width} ${HEIGHT}`} role="img" aria-label={b.t('chart.shares')}>

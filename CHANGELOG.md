@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0 (2026-10-18)
+
+- Image export for podcasters and admins: an "Image" button next to each exportable stat on `/p/stats`
+  (podcast and books, any scope) and on the episode page opens a dialog with a live preview and Download /
+  Share (the phone's share sheet, where the browser can hand over files, e.g. straight into an Instagram
+  story).
+  - 16 exports: overview, speaking time (ring or bars), episode-by-episode chart (shares, lengths, laughs),
+    records, one full ranking, most mentioned names (cloud or bars), season comparison; for books overview,
+    chapter chart (length, words per sentence, dialogue), chapter and chapter-group records, chapter
+    groups, characters and names, each narrowable to one chapter group; per episode overview, speaking
+    time, names and the book chapters it covers.
+  - Formats: Instagram story 1080×1920 (keeps Instagram's top and bottom bars clear), posts 1080×1350 and
+    1080×1080, wide 1920×1080 and a 1200×675 link card; PNG, JPEG or SVG.
+  - Every image carries the link to the page it came from, as text and an optional QR code.
+  - The dialog has its own bundle/spoiler choice (a spoiler badge marks images with spoilers), its own
+    language for the image, editable headline/subline/name, colours (from the page, or light/dark/accent
+    presets, each colour editable, with a contrast warning), background (solid, gradient, glow, dots, grid),
+    font, text size, corners, spacing, cards on/off and speaker colours or accent shades.
+  - "Save as default" stores the look, format and file type in the `export` site doc (podcasters only); an
+    optional logo (PNG/JPEG/WebP, up to 2 MiB) goes to the plugin's file storage. The ingestor leaves images
+    alone.
+  - New exports are one entry in `frontend/src/export/items.tsx`; new sizes one line in `formats.ts`.
+- Manifest: `export` behind the podcaster read floor; `blobs.mimeTypes` adds `image/png`, `image/jpeg`,
+  `image/webp`.
+- New dependency: `uqr` 0.1.3 (MIT) for the QR code.
+
 ## 0.2.0 (2026-10-10)
 
 - Chapter groups for books: chapters sharing a heading in the book (MAT's `heading_raw`, "Jaime" for "Jaime I")

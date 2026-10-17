@@ -392,7 +392,7 @@ public final class Ingestor {
         for (int page = 0; fresh.size() < BATCH; page++) {
             List<BlobInfo> listed = blobs.list(page, PAGE);
             for (BlobInfo b : listed) {
-                if (!known.contains(b.ref()) && ID.matcher(b.ref()).matches()) {
+                if (!known.contains(b.ref()) && ID.matcher(b.ref()).matches() && isUpload(b)) {
                     fresh.add(b);
                 }
             }
@@ -409,6 +409,14 @@ public final class Ingestor {
             changed |= read(b.ref(), b.ref(), name, at, null, matcher, bundles);
         }
         return changed;
+    }
+
+    /**
+     * Whether a stored file is a stats upload. Images are not: the export dialog keeps the site's logo in the
+     * same file storage (`export` doc), and reading it as an archive would turn it into a failed import.
+     */
+    static boolean isUpload(BlobInfo b) {
+        return b.mime() == null || !b.mime().startsWith("image/");
     }
 
     // ---- assignment -------------------------------------------------------------------------------------

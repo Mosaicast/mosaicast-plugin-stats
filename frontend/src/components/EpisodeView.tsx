@@ -14,6 +14,7 @@ import { BookEpisode } from './BookViews';
 import { hasStats, Icon, LoadingBar, Root, ShareBar, Tiles, TopNames, useSelection, useSiteData, type Basics } from './common';
 import { SpeakerTable } from './SpeakerTable';
 import { Timeline } from './Timeline';
+import { ExportButton, ExportProvider, type ExportScope } from '../export/ExportContext';
 
 /**
  * Full stats on the episode page (episode / main): the selected podcast bundles (combined when several are
@@ -22,8 +23,9 @@ import { Timeline } from './Timeline';
  */
 export function EpisodeView({ ctx }: { ctx: PluginContext }) {
   const slug = ctx.scope.id;
-  const { index, basics: b } = useSiteData(ctx);
+  const { index, basics: b, settings, bundleSettings } = useSiteData(ctx);
   const slugs = useMemo(() => [slug], [slug]);
+  const scope = useMemo<ExportScope>(() => ({ area: 'episode', slugs, slug, path: ctx.links.episode(slug) }), [slugs, slug, ctx.links]);
   const sel = useSelection(ctx, b, index, slugs);
   const [docs, setDocs] = useState<Record<string, EpisodeStats | BookStats | null> | undefined>(undefined);
   const wanted = useMemo(() => sel.available.filter((x) => sel.selected.has(x.id)), [sel.available, sel.selected]);
@@ -91,64 +93,70 @@ export function EpisodeView({ ctx }: { ctx: PluginContext }) {
   const stats = combine(podcastDocs);
   return (
     <Root>
-      <section className="panel" aria-labelledby="stats-title" style={{ marginTop: 16 }}>
-        <div className="head">
-          <h2 id="stats-title">{b.t('episode.title')}</h2>
-        </div>
-        {sel.picker}
-        {!stats && bookBundles.length === 0 && <p className="small muted">{b.t('bundle.nothingSelected')}</p>}
-        {stats && stats.speakers.length > 0 && (
-          <>
-            <ShareBar
-              parts={stats.speakers.map((s) => ({ ...s, seconds: s.speakingSeconds }))}
-              b={b}
-              detail={(key) => {
-                const s = stats.speakers.find((x) => x.key === key);
-                return s ? fmt.clock(s.speakingSeconds) : null;
-              }}
-            />
-            <div className="section">
-              <Tiles tiles={episodeTiles(stats, b)} />
-            </div>
-            {podcastBundles.some((x) => (docs![x.id] as EpisodeStats).timeline) && (
-              <div className="section">
-                <h3>{b.t('episode.timeline')}</h3>
-                {podcastBundles.map((x) => (
-                  <div key={x.id} style={{ marginBottom: 10 }}>
-                    {podcastBundles.length > 1 && <div className="small muted" style={{ marginBottom: 4 }}>{b.bundleName(x)}</div>}
-                    <Timeline ctx={ctx} slug={slug} stats={docs![x.id] as EpisodeStats} b={b} />
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="section">
-              <h3>{b.t('speakers.title')}</h3>
-              <SpeakerTable
-                rows={stats.speakers.map((s) => ({
-                  key: s.key, label: s.label, name: s.name, seconds: s.speakingSeconds, share: s.share,
-                  words: s.words ?? null, wpm: s.wpm ?? null, questions: s.questions ?? null, turns: s.turns ?? null,
-                  longest: s.longestTurn ? { seconds: s.longestTurn.seconds, at: s.longestTurn.at, slug } : null,
-                }))}
-                ctx={ctx}
-                b={b}
-              />
-            </div>
-            {stats.entities.length > 0 && (
-              <div className="section">
-                <h3>{b.t('names.title')}</h3>
-                <TopNames groups={Object.fromEntries(stats.entities.map((g) => [g.label, g.top]))} b={b} />
-              </div>
-            )}
-          </>
-        )}
-        {bookBundles.map((x) => (
-          <div className="section" key={x.id}>
-            <h3>{bookBundles.length > 1 ? b.bundleName(x) : b.t('book.title')}</h3>
-            <BookEpisode book={docs![x.id] as BookStats} seconds={stats?.durationSeconds ?? null} season={season} places={places} b={b} />
+      <ExportProvider ctx={ctx} index={index} settings={settings} bundleSettings={bundleSettings} selected={sel.selected} scope={scope} b={b}>
+        <section className="panel" aria-labelledby="stats-title" style={{ marginTop: 16 }}>
+          <div className="head">
+            <h2 id="stats-title">{b.t('episode.title')}</h2>
+            {stats && <ExportButton item="episode.summary" />}
           </div>
-        ))}
-        {podcastDocs[0] && <p className="tiny muted section">{sourceLine(podcastDocs[0], b)}</p>}
-      </section>
+          {sel.picker}
+          {!stats && bookBundles.length === 0 && <p className="small muted">{b.t('bundle.nothingSelected')}</p>}
+          {stats && stats.speakers.length > 0 && (
+            <>
+              <ShareBar
+                parts={stats.speakers.map((s) => ({ ...s, seconds: s.speakingSeconds }))}
+                b={b}
+                detail={(key) => {
+                  const s = stats.speakers.find((x) => x.key === key);
+                  return s ? fmt.clock(s.speakingSeconds) : null;
+                }}
+              />
+              <div className="section">
+                <Tiles tiles={episodeTiles(stats, b)} />
+              </div>
+              {podcastBundles.some((x) => (docs![x.id] as EpisodeStats).timeline) && (
+                <div className="section">
+                  <h3>{b.t('episode.timeline')}</h3>
+                  {podcastBundles.map((x) => (
+                    <div key={x.id} style={{ marginBottom: 10 }}>
+                      {podcastBundles.length > 1 && <div className="small muted" style={{ marginBottom: 4 }}>{b.bundleName(x)}</div>}
+                      <Timeline ctx={ctx} slug={slug} stats={docs![x.id] as EpisodeStats} b={b} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="section">
+                <ExportButton item="episode.speakers" />
+                <h3>{b.t('speakers.title')}</h3>
+                <SpeakerTable
+                  rows={stats.speakers.map((s) => ({
+                    key: s.key, label: s.label, name: s.name, seconds: s.speakingSeconds, share: s.share,
+                    words: s.words ?? null, wpm: s.wpm ?? null, questions: s.questions ?? null, turns: s.turns ?? null,
+                    longest: s.longestTurn ? { seconds: s.longestTurn.seconds, at: s.longestTurn.at, slug } : null,
+                  }))}
+                  ctx={ctx}
+                  b={b}
+                />
+              </div>
+              {stats.entities.length > 0 && (
+                <div className="section">
+                  <ExportButton item="episode.names" />
+                  <h3>{b.t('names.title')}</h3>
+                  <TopNames groups={Object.fromEntries(stats.entities.map((g) => [g.label, g.top]))} b={b} />
+                </div>
+              )}
+            </>
+          )}
+          {bookBundles.map((x) => (
+            <div className="section" key={x.id}>
+              <ExportButton item="episode.book" />
+              <h3>{bookBundles.length > 1 ? b.bundleName(x) : b.t('book.title')}</h3>
+              <BookEpisode book={docs![x.id] as BookStats} seconds={stats?.durationSeconds ?? null} season={season} places={places} b={b} />
+            </div>
+          ))}
+          {podcastDocs[0] && <p className="tiny muted section">{sourceLine(podcastDocs[0], b)}</p>}
+        </section>
+      </ExportProvider>
     </Root>
   );
 }

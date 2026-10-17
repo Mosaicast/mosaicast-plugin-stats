@@ -1,6 +1,6 @@
 {
   "id": "stats",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "platformApi": "0.19.1",
   "name": "Stats",
   "license": "AGPL-3.0-or-later",
@@ -88,7 +88,8 @@
         "keys": [
           "import:*",
           "staged:*",
-          "cmd:*"
+          "cmd:*",
+          "export"
         ],
         "readableBy": "podcaster"
       },
@@ -104,7 +105,10 @@
     "maxFileBytes": 20971520,
     "quotaBytes": 536870912,
     "mimeTypes": [
-      "application/zip"
+      "application/zip",
+      "image/png",
+      "image/jpeg",
+      "image/webp"
     ],
     "readableBy": "podcaster",
     "writableBy": "podcaster"

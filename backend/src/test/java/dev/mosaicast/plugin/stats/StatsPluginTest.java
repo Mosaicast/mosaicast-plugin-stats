@@ -50,7 +50,7 @@ class StatsPluginTest {
     @BeforeEach
     void setUp() {
         store = new InMemoryDocStore().withBackendOwned(BACKEND_OWNED);
-        blobs = new InMemoryPluginBlobs().withLimits(20L << 20, 64L << 20).withMimeTypes(Set.of("application/zip"));
+        blobs = new InMemoryPluginBlobs().withLimits(20L << 20, 64L << 20).withMimeTypes(Set.of("application/zip", "image/png", "image/jpeg", "image/webp"));
         config = new MapPluginConfig();
         FakeFeedAccess feeds = new FakeFeedAccess(Map.of(
                 Scope.site(), List.of("s5e01", "s5e02", "s4e01"),
@@ -315,6 +315,16 @@ class StatsPluginTest {
         ctx.runScheduled();
         assertEquals(first.processedAt(), importRecord(ref).processedAt(), "not read again on the next tick");
         assertEquals(1, store.query(Scope.site(), Docs.IMPORT).size());
+    }
+
+    @Test
+    void leavesTheExportLogoAlone() {
+        new StatsPlugin().register(ctx);
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10, 0, 0, 0, 13};
+        String logo = blobs.put("logo.png", "image/png", new ByteArrayInputStream(png)).ref();
+        ctx.runScheduled();
+        assertTrue(store.query(Scope.site(), Docs.IMPORT).isEmpty(), "a logo is not an upload to read");
+        assertTrue(blobs.stat(logo).isPresent());
     }
 
     @Test
