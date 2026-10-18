@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 The Mosaicast Authors
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { ChapterPoint } from '../book';
 import * as fmt from '../format';
 import { tipBeside, titleOf, useWidth, type Basics } from './common';
@@ -17,7 +17,13 @@ type Measure = 'words' | 'sentences';
  * so nothing shares an axis it doesn't belong on. Where one book ends and the next starts, a line and the
  * book's title mark the change.
  */
-export function ChapterCharts({ points, labels, b }: { points: ChapterPoint[]; labels?: Record<string, string>; b: Basics }) {
+export function ChapterCharts({ points, labels, b, actions }: {
+  points: ChapterPoint[];
+  labels?: Record<string, string>;
+  b: Basics;
+  /** Buttons next to the first heading (export). */
+  actions?: ReactNode;
+}) {
   const [measure, setMeasure] = useState<Measure>('words');
   const sentences = points.some((p) => p.sentences != null);
   const speech = points.some((p) => p.dialogueShare != null);
@@ -25,6 +31,7 @@ export function ChapterCharts({ points, labels, b }: { points: ChapterPoint[]; l
   const size = measure === 'sentences' && sentences ? 'sentences' : 'words';
   return (
     <div>
+      {actions}
       <div className="chart-head">
         <h3>{b.t('bookChart.length')}</h3>
         {sentences && (

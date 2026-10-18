@@ -18,19 +18,20 @@ describe('plugin.json', () => {
   });
 
   it('reserves nothing the admin page writes', () => {
-    for (const key of ['cmd:123', 'speakers', 'bundles']) expect(covered(key)).toBe(false);
+    for (const key of ['cmd:123', 'speakers', 'bundles', 'export']) expect(covered(key)).toBe(false);
   });
 
   it('keeps bookkeeping from visitors and bundle settings with admins', () => {
-    // Import records and the queue can name an episode that is still a quiet plan.
+    // Import records and the queue can name an episode that is still a quiet plan; the export default is
+    // the podcasters' working setting, not something to publish.
     expect(manifest.data.keyFloors).toEqual([
-      { keys: ['import:*', 'staged:*', 'cmd:*'], readableBy: 'podcaster' },
+      { keys: ['import:*', 'staged:*', 'cmd:*', 'export'], readableBy: 'podcaster' },
       { keys: ['bundles'], writableBy: 'admin' },
     ]);
   });
 
-  it('asks for ZIP storage and nothing unstorable', () => {
-    expect(manifest.blobs.mimeTypes).toEqual(['application/zip']);
+  it('asks for ZIP storage (uploads) and raster images (the export logo), nothing unstorable', () => {
+    expect(manifest.blobs.mimeTypes).toEqual(['application/zip', 'image/png', 'image/jpeg', 'image/webp']);
     expect(manifest.blobs.mimeTypes).not.toContain('image/svg+xml');
   });
 

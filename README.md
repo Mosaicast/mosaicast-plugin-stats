@@ -4,7 +4,7 @@
 > audio analysis, and chapter stats for the books you talk about. MAT is the first supported source.
 
 Part of **[Mosaicast](https://github.com/Mosaicast)**, an extensible website platform for podcasts. Status:
-**0.2.0** (see [CHANGELOG](CHANGELOG.md)). Needs core 0.8.0 or newer.
+**0.3.0** (see [CHANGELOG](CHANGELOG.md)). Needs core 0.8.0 or newer.
 
 ![The stats page: totals, speaking time, per-episode charts, records and the most mentioned names](docs/screenshots/stats-page.png)
 
@@ -23,6 +23,9 @@ them:
 - **At `/p/stats`:** the whole show or one season: totals, speaking time per person, a chart per episode,
   records (longest episode, most back-and-forth, fastest talker, …, each with its full ranking) and the most
   mentioned names.
+- **Images to share** (podcasters): an "Image" button next to each stat turns it into a picture for an
+  Instagram story, a post or a link card, with the link back to the page. See [Sharing stats as
+  images](#sharing-stats-as-images).
 - **At `/p/stats/manage`** (podcasters): upload results in bulk, check what was read, assign each result to
   an episode (the plugin suggests one from the file name, and spreads a book's chapters over the episodes by
   title), set up bundles, and set display names and colours per speaker.
@@ -110,6 +113,40 @@ pages show a short book summary with a link to it.
 ![Book stats chapter by chapter](docs/screenshots/books.png)
 ![Who shows up where](docs/screenshots/books-heatmap.png)
 
+## Sharing stats as images
+
+Podcasters and admins see an **Image** button next to the stats on `/p/stats` (podcast and books, the whole
+show, a season or one book) and on the episode page. It opens a dialog with a live preview:
+
+![The export dialog: settings on the left, the story image on the right](docs/screenshots/export-dialog.png)
+
+
+- **What:** the stat the button was next to, or any other export of the page: overview, speaking time,
+  episode-by-episode chart, records, one full ranking, most mentioned names, season comparison; for books
+  overview, chapter chart, chapter and chapter-group records, chapter groups, characters; for an episode its
+  overview, speaking time, names and book chapters. Some have options (ring or bars, how many, which record,
+  one chapter group).
+- **Which stats:** the dialog has its own bundle and spoiler ticks, starting from what the page shows. An
+  image with a spoiler bundle in it gets a "Spoilers" badge.
+- **Format:** Instagram story (1080×1920, Instagram's own top and bottom bars stay clear), post 4:5 and 1:1,
+  wide 16:9 and a 1200×675 link card, as PNG, JPEG or SVG. **Language** of the image, independent of the page.
+- **Texts:** headline and subline (defaults per export), the name at the top (the site's host until you type
+  one), and the link to the page as text and QR code.
+- **Look:** colours from the page, or light, dark and accent presets, every colour editable (with a warning
+  when text gets hard to read); solid, gradient, glow, dots or grid background; font, text size, corners,
+  spacing, cards behind content, speaker colours or shades of the accent; an optional logo.
+
+**Download** saves the file; **Share** (where the browser can share files, i.e. most phones) hands it to the
+share sheet, e.g. straight into an Instagram story. **Save as default** keeps the look, format and file type
+for everyone who exports on this site (`export` doc, podcasters only); the logo is uploaded to the plugin's
+file storage right away.
+
+Images are drawn in the browser: the preview is an SVG with plain colours and system fonts, saved as is for
+SVG or drawn into a canvas for PNG/JPEG. Web fonts can't be used inside such an image, so the font choices
+are common system fonts. To add an export, add an entry to `frontend/src/export/items.tsx` (it builds a small
+model from the stats in view and draws it into whatever box the frame leaves, with the blocks in `kit.tsx`)
+and an `ExportButton` where it belongs; formats live in `formats.ts`.
+
 ## Uploading results
 
 1. Run [MAT](https://github.com/GameOfPods/MAT) (0.3 or newer) with `--output-zip` on your episodes.
@@ -178,8 +215,8 @@ backend ◄───────────────────────
   describe an episode, a season or a feed.
   Mapping details for MAT: [`docs/MAT-FORMAT.md`](docs/MAT-FORMAT.md).
 - **Storage.** All in the generic doc store. Everything the backend computes is `backendOwned`, so nobody
-  can overwrite published stats through the data API. Clients write `cmd:*` (the queue), `bundles` and
-  `speakers` (settings), and signed-in visitors their own `view` choice in the per-user scope.
+  can overwrite published stats through the data API. Clients write `cmd:*` (the queue), `bundles`,
+  `speakers` and `export` (settings), and signed-in visitors their own `view` choice in the per-user scope.
 - **Assignments.** An import can be shown in several places: a podcast result on one episode in one bundle,
   a book on many episodes, each with the chapters it covers. One import per episode and bundle; assigning
   another one replaces it.
@@ -192,7 +229,8 @@ backend ◄───────────────────────
   would go stale.
 - **Archives are private.** The stats are public (`data.readableBy: anonymous`), but the ZIPs behind them
   hold full transcripts and local file paths, so `blobs.readableBy` is `podcaster`. Removing an import
-  removes its archive.
+  removes its archive. The export logo shares the file storage; the backend reads only non-image files as
+  uploads.
 - **Release phases**: stats are published only for released episodes. Core tells the plugin when a planned
   episode is released (`onEpisodeReleased`) and when one goes quiet again, is withdrawn or cancelled
   (`onEpisodePhaseChanged`, platformApi 0.19), and stats go up or down right then. The schedule double-checks
@@ -200,7 +238,7 @@ backend ◄───────────────────────
 - **Bookkeeping is for podcasters.** Import records, staged results and the command queue can name an episode
   that is still a quiet plan, so they sit behind a `podcaster` key floor (`data.keyFloors`, platformApi
   0.19). That's also why quiet plans can be suggested as matches: you can analyse an episode before you
-  announce it.
+  announce it. The export default (`export`) sits behind the same floor: it's a working setting, not content.
 - **Seasons** come from the episode snapshot (`DisplaySnapshot.season`, platformApi 0.17), with the host's
   episode label as a fallback.
 

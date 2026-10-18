@@ -31,10 +31,14 @@ cd frontend && npm test && npm run typecheck # Vite doesn't type-check; tsc does
   `StatsPlugin.hasRoute`); `aggregate.ts`/`book.ts` sum any episode set (`chapterPoints` for the books
   view, `resolveGroups`/`chapterGroups` for chapter groups across the books in view), `useChapterDetails` loads per-chapter names with one `getMany`, `combine.ts` adds ticked podcast bundles,
   `viewChoice.ts` keeps the visitor's bundle/spoiler choice, `seasons.ts` looks seasons up from snapshots.
+  `export/` = image export (podcasters): `items.tsx` registry (build model → draw into a box), `kit.tsx` SVG
+  blocks, `frame.tsx` (background/header/footer link+QR), `formats.ts`, `design.ts`, `preset.ts` (`export`
+  doc, logo blob), `render.ts` (SVG → PNG/JPEG via `data:` URL), `ExportContext.tsx` (`ExportProvider`,
+  `ExportButton`), `ExportDialog.tsx`.
 - `docs/MAT-FORMAT.md` — how MAT results map to `EpisodeStats` (repo-owned, keep current).
 
 ## Plugin-specific rules
-- The browser never writes stats. It writes `cmd:*` (queue), `bundles` and `speakers` (settings), and
+- The browser never writes stats. It writes `cmd:*` (queue), `bundles`, `speakers` and `export` (settings), and
   `user/me/view` (a visitor's choice); everything else is `backendOwned` (`stats:*`, `index`, `import:*`,
   `staged:*`, `readers`). Never reserve a key the UI writes (`manifest.test.ts` checks).
 - Published stats: `stats:<bundle>` on the target. Bundles come from the `bundles` doc (podcaster-written,
@@ -53,12 +57,15 @@ cd frontend && npm test && npm run typecheck # Vite doesn't type-check; tsc does
 - Stats go public only when the target episode is RELEASED (`Ingestor.liveness`, `ImportRecord.live`): held
   for PLANNED/UPCOMING/WITHDRAWN, published on `onEpisodeReleased` and by `reconcile` on the schedule. The
   index lists live stats only. `onEpisodePhaseChanged` → `Ingestor.phaseChanged` takes stats down at once when
-  an episode goes quiet, is withdrawn or cancelled. Quiet plans may be suggested: `import:*`, `staged:*` and
-  `cmd:*` sit behind a podcaster read key floor. Anything that can name a quiet plan must stay behind it.
+  an episode goes quiet, is withdrawn or cancelled. Quiet plans may be suggested: `import:*`, `staged:*`,
+  `cmd:*` and `export` sit behind a podcaster read key floor. Anything that can name a quiet plan must stay behind it.
 - `bundles` is admin-writable (key floor); the manage page shows podcasters a read-only editor. `speakers`
   stays podcaster-writable.
 - Personal data: only the USER-scope `view` doc, which core exports/erases. `StatsPlugin` is a
   `UserDataHandler` that says so; keep it true if the plugin ever stores an account id.
+- Image export: SVG with literal colours and system fonts only (no CSS vars, no web fonts, no external
+  images: logo is embedded as `data:`); CSP allows `img-src data:` but not `blob:`. `Ingestor.isUpload`
+  skips `image/*` blobs (the logo). New export = entry in `ITEMS` + `ExportButton` + locale keys.
 - Needs core 0.8.0+. Seasons: `DisplaySnapshot.season` via `ctx.feeds.displayMany` (`useSeasons`), labels
   only as fallback. The feed tile follows `ctx.filter.season` when set.
 

@@ -4,7 +4,8 @@
 import type { PluginContext } from '@mosaicast/plugin-sdk';
 import { useMemo } from 'react';
 import { aggregate, LAUGHTER, type Aggregate } from '../aggregate';
-import { podcastRankings, type RecordId, type Ranking } from '../records';
+import { podcastRankings, type Ranking } from '../records';
+import { EXTRA, VALUE } from './recordValues';
 import { RecordGroups, type RankRow, type RecordSpec } from './Records';
 import * as fmt from '../format';
 import { bySeason, type SeasonLookup } from '../seasons';
@@ -13,6 +14,7 @@ import { chapterPoints, sentenceTotals } from '../book';
 import { EpisodeCharts } from './EpisodeCharts';
 import { ShareBar, Tiles, TopNames, titleOf, type Basics } from './common';
 import { SpeakerTable } from './SpeakerTable';
+import { ExportButton, ExportRow } from '../export/ExportContext';
 
 /**
  * Everything the stats page shows for a set of episodes: totals, who talks how much, per-episode charts,
@@ -54,6 +56,7 @@ export function ScopeStats({
   const laughs = agg.events[LAUGHTER]?.count ?? 0;
   return (
     <>
+      <ExportRow item="podcast.summary" />
       <Tiles
         tiles={[
           { label: b.t('tile.analysed'), value: fmt.count(agg.analysed, b.locale), sub: b.t('tile.ofTotal', { total: fmt.count(agg.total, b.locale) }) },
@@ -70,6 +73,7 @@ export function ScopeStats({
       />
 
       <section className="section">
+        <ExportButton item="podcast.speakers" />
         <h3>{b.t('speakers.title')}</h3>
         <ShareBar parts={agg.speakers} b={b} />
         <div style={{ marginTop: 12 }}>
@@ -84,7 +88,7 @@ export function ScopeStats({
 
       {points.length > 1 && (
         <section className="section">
-          <EpisodeCharts points={points} people={agg.speakers.map((s) => s.key)} labels={labels} b={b} />
+          <EpisodeCharts points={points} people={agg.speakers.map((s) => s.key)} labels={labels} b={b} actions={<ExportButton item="podcast.trend" />} />
         </section>
       )}
 
@@ -92,6 +96,7 @@ export function ScopeStats({
 
       {Object.keys(agg.entities).length > 0 && (
         <section className="section">
+          <ExportButton item="podcast.names" />
           <h3>{b.t('names.title')}</h3>
           <TopNames groups={agg.entities} b={b} limit={15} />
         </section>
@@ -151,6 +156,7 @@ function Records({ agg, podcasts, slugs, ctx, b }: { agg: Aggregate; podcasts: R
   return (
     <RecordGroups
       b={b}
+      actions={<ExportButton item="podcast.records" />}
       groups={[
         { title: b.t('records.episodes'), records: rankings.filter((r) => r.of === 'episode').map(spec) },
         { title: b.t('records.people'), records: rankings.filter((r) => r.of !== 'episode').map(spec) },
@@ -158,38 +164,6 @@ function Records({ agg, podcasts, slugs, ctx, b }: { agg: Aggregate; podcasts: R
     />
   );
 }
-
-const length = (v: number, b: Basics) => (v < 60 ? fmt.pause(v, b.locale) : fmt.clock(v));
-const share = (v: number, b: Basics) => fmt.percent(v, b.locale);
-const wpm = (v: number, b: Basics) => b.t('unit.wpm', { n: fmt.count(v, b.locale) });
-
-/** How each record's value reads. */
-const VALUE: Record<RecordId, (v: number, b: Basics) => string> = {
-  longest: length,
-  shortest: length,
-  words: (v, b) => b.t('unit.words', { n: fmt.count(v, b.locale) }),
-  pace: wpm,
-  laughs: (v, b) => fmt.count(v, b.locale),
-  questions: (v, b) => fmt.count(v, b.locale),
-  backAndForth: (v, b) => b.t('unit.perMinute', { n: fmt.decimal(v, b.locale) }),
-  crosstalk: length,
-  pause: (v, b) => fmt.pause(v, b.locale),
-  oneSided: share,
-  balanced: share,
-  fastest: wpm,
-  slowest: wpm,
-  asks: (v, b) => fmt.count(v, b.locale),
-  monologue: length,
-};
-
-/** And the second number, where there is one. */
-const EXTRA: Partial<Record<RecordId, (v: number, b: Basics) => string>> = {
-  laughs: (v, b) => b.t('tile.perHour', { n: fmt.decimal(v, b.locale) }),
-  backAndForth: (v, b) => b.t('unit.turns', { n: fmt.count(v, b.locale) }),
-  fastest: (v, b) => b.t('unit.words', { n: fmt.count(v, b.locale) }),
-  slowest: (v, b) => b.t('unit.words', { n: fmt.count(v, b.locale) }),
-  asks: (v, b) => b.t('unit.perSpeakingHour', { n: fmt.decimal(v, b.locale) }),
-};
 
 function SeasonTable({ podcasts, slugs, b, seasonOf, onSeason }: { podcasts: Record<string, EpisodeStats>; slugs: string[]; b: Basics; seasonOf: SeasonLookup; onSeason?: (n: number) => void }) {
   const rows = [...bySeason(slugs, seasonOf).entries()]
@@ -199,6 +173,7 @@ function SeasonTable({ podcasts, slugs, b, seasonOf, onSeason }: { podcasts: Rec
   if (rows.length < 2) return null;
   return (
     <section className="section">
+      <ExportButton item="podcast.seasons" />
       <h3>{b.t('seasons.title')}</h3>
       <div className="table-wrap">
         <table>

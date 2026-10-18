@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 The Mosaicast Authors
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon, type Basics } from './common';
 
 /** One place in a ranking, ready to draw. */
@@ -32,12 +32,18 @@ export interface RecordSpec {
  * Record cards in groups ("Episodes", "People"), each showing its holder. "Ranking" opens a dialog with
  * everyone behind them, so a record is never just a number without context.
  */
-export function RecordGroups({ groups, b }: { groups: { title?: string; records: RecordSpec[] }[]; b: Basics }) {
+export function RecordGroups({ groups, b, actions }: {
+  groups: { title?: string; records: RecordSpec[] }[];
+  b: Basics;
+  /** Buttons next to the heading (export). */
+  actions?: ReactNode;
+}) {
   const [open, setOpen] = useState<RecordSpec | null>(null);
   const shown = groups.filter((g) => g.records.length > 0);
   if (shown.length === 0) return null;
   return (
     <section className="section">
+      {actions}
       <h3>{b.t('records.title')}</h3>
       {shown.map((g, i) => (
         <div key={g.title ?? i} style={{ marginTop: i > 0 ? 14 : 0 }}>
