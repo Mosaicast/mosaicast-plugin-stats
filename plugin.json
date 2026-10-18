@@ -126,7 +126,7 @@
           {
             "name": "mc.stats.view",
             "type": "sessionStorage",
-            "purpose": "Remembers which stats you picked (for example whether spoilers are shown) while this tab is open. Only written when you change the choice; holds no identifier.",
+            "purpose": "Remembers which stats you picked, like whether spoilers show, while this tab is open. Only saved when you change it, and holds no identifier.",
             "duration": "session"
           }
         ]

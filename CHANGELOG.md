@@ -25,6 +25,8 @@
 - Manifest: `export` behind the podcaster read floor; `blobs.mimeTypes` adds `image/png`, `image/jpeg`,
   `image/webp`.
 - New dependency: `uqr` 0.1.3 (MIT) for the QR code.
+- Wording: a few texts follow the suite's writing guide (mosaicast-core `docs/WRITING.md`), shorter and
+  without "not X" set-ups. Keys and placeholders are unchanged.
 
 ## 0.2.0 (2026-10-10)
 
