@@ -4,7 +4,7 @@
 > audio analysis, and chapter stats for the books you talk about. MAT is the first supported source.
 
 Part of **[Mosaicast](https://github.com/Mosaicast)**, an extensible website platform for podcasts. Status:
-**0.3.0** (see [CHANGELOG](CHANGELOG.md)). Needs core 0.8.0 or newer.
+**0.4.0** (see [CHANGELOG](CHANGELOG.md)). Needs core 0.10.0 or newer.
 
 ![The stats page: totals, speaking time, per-episode charts, records and the most mentioned names](docs/screenshots/stats-page.png)
 
@@ -260,8 +260,8 @@ cd backend && ./gradlew test                   # readers, archive limits, the wh
 cd frontend && npm test && npm run typecheck   # aggregation, components, manifest contract
 ```
 
-The backend needs the SDK from GitHub Packages (`gpr.user` / `gpr.token` in `~/.gradle/gradle.properties`, a
-PAT with `read:packages`) or an SDK checkout published with `./gradlew publishToMavenLocal`.
+The backend gets the SDK from Maven Central. An SDK checkout published with `./gradlew publishToMavenLocal`
+wins when present.
 
 `./gradlew test -PstatsSamples=/path/to/results` also runs every ZIP in that folder through the readers and
 prints the numbers, which is handy for checking real results without putting them in the repo.
@@ -271,8 +271,8 @@ prints the numbers, which is handy for checking real results without putting the
 `./build.sh`, then copy `dist/` to `$MOSAICAST_PLUGINS_DIR/stats/` (or run `./install.sh`) and restart core.
 A tagged release attaches `plugin.tgz`, installable as `MOSAICAST_PLUGINS=Mosaicast/mosaicast-plugin-stats@vX.Y.Z#sha256:…`.
 
-Needs **core 0.8.0** or newer (platformApi 0.19): key floors, the phase-change event, quiet plans in
-`ctx.episodes` for podcasters, and uploads judged by their bytes when curl sends `application/octet-stream`.
+Needs **core 0.10.0** or newer (platformApi 0.20; tested on core 0.11.1). A 0.19 manifest doesn't load on
+these hosts, and this one doesn't load on older ones.
 
 **Config** (admin): `queueIntervalSeconds`, how often the backend works the upload queue (10–600 s,
 default 10).

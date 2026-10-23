@@ -1,7 +1,7 @@
 {
   "id": "stats",
-  "version": "0.3.0",
-  "platformApi": "0.19.1",
+  "version": "0.4.0",
+  "platformApi": "0.20.0",
   "name": "Stats",
   "license": "AGPL-3.0-or-later",
   "author": "The Mosaicast Authors",

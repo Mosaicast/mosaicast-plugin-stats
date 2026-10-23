@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "dev.mosaicast.plugin"
-version = "0.3.0"
+version = "0.4.0"
 
 java {
     toolchain {
@@ -17,27 +17,18 @@ java {
 repositories {
     // An SDK checkout published with `./gradlew publishToMavenLocal` wins during development.
     mavenLocal()
+    // The SDK is on Maven Central from 0.19.2.
     mavenCentral()
-    maven {
-        name = "mosaicastPluginSdk"
-        url = uri("https://maven.pkg.github.com/Mosaicast/mosaicast-plugin-sdk")
-        credentials {
-            // GitHub Packages wants auth even for public reads: gpr.* gradle properties locally,
-            // GITHUB_ACTOR/GITHUB_TOKEN in CI.
-            username = providers.gradleProperty("gpr.user").orElse(providers.environmentVariable("GITHUB_ACTOR")).orNull
-            password = providers.gradleProperty("gpr.token").orElse(providers.environmentVariable("GITHUB_TOKEN")).orNull
-        }
-    }
 }
 
 dependencies {
-    compileOnly("dev.mosaicast:plugin-api:0.19.1")
+    compileOnly("dev.mosaicast:plugin-api:0.20.0")
     compileOnly("org.pf4j:pf4j:3.16.0")
     annotationProcessor("org.pf4j:pf4j:3.16.0") // generates the PF4J extension index for @Extension
 
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("dev.mosaicast:plugin-testkit:0.19.1")
+    testImplementation("dev.mosaicast:plugin-testkit:0.20.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
