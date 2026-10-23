@@ -19,7 +19,7 @@ cd frontend && npm test && npm run typecheck # Vite doesn't type-check; tsc does
 ```
 
 ## Layout
-- `plugin.json` — id `stats`, platformApi **0.19.1** (the host matches major.minor at load; keep the whole
+- `plugin.json` — id `stats`, platformApi **0.20.0** (the host matches major.minor at load; keep the whole
   string equal to the `plugin-api`/`plugin-testkit`/`@mosaicast/plugin-sdk` pins, CI and `manifest.test.ts`
   compare them).
 - `backend/…/stats/` — `StatsPlugin` (schedule, routes, OG), `read/` (`StatsReader` SPI, `Archive` with zip
@@ -66,7 +66,7 @@ cd frontend && npm test && npm run typecheck # Vite doesn't type-check; tsc does
 - Image export: SVG with literal colours and system fonts only (no CSS vars, no web fonts, no external
   images: logo is embedded as `data:`); CSP allows `img-src data:` but not `blob:`. `Ingestor.isUpload`
   skips `image/*` blobs (the logo). New export = entry in `ITEMS` + `ExportButton` + locale keys.
-- Needs core 0.8.0+. Seasons: `DisplaySnapshot.season` via `ctx.feeds.displayMany` (`useSeasons`), labels
+- Needs core 0.10.0+ (platformApi 0.20). SDK comes from Maven Central. Seasons: `DisplaySnapshot.season` via `ctx.feeds.displayMany` (`useSeasons`), labels
   only as fallback. The feed tile follows `ctx.filter.season` when set.
 
 ## Conventions (binding)

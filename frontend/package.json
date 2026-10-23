@@ -1,7 +1,7 @@
 {
   "name": "@mosaicast/plugin-stats-frontend",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "build": "vite build",
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@mosaicast/plugin-sdk": "0.19.1",
+    "@mosaicast/plugin-sdk": "0.20.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "uqr": "0.1.3"

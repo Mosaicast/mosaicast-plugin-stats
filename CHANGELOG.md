@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 (2026-10-23)
+
+- SDK 0.20.0, `platformApi` 0.20.0. Needs core 0.10.0 or newer (tested on 0.11.1); a 0.20 host no longer loads
+  the 0.19 build. No behaviour change.
+- The backend gets the SDK from Maven Central. The GitHub Packages repository and its token are gone from the
+  build and CI.
+- `docs/ARCHITECTURE.md` synced from core 0.11.1.
+
 ## 0.3.0 (2026-10-18)
 
 - Image export for podcasters and admins: an "Image" button next to each exportable stat on `/p/stats`
